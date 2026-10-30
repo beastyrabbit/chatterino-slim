@@ -67,7 +67,8 @@ jobs:
             -DCHATTERINO_UPDATER=Off \
             -DCHATTERINO_PLUGINS=On \
             ..
-          make -j"$(nproc)"
+          # nproc sees every core of the cluster node, not the pod limit
+          make -j4
           make install
 
       # Qt is static, but ICU is linked from Ubuntu 22.04 (soname 70), which

@@ -78,7 +78,9 @@ jobs:
             -DCHATTERINO_UPDATER=Off \
             -DCMAKE_BUILD_TYPE=Debug \
             ..
-          cmake --build . -j "$(nproc)"
+          # nproc sees every core of the cluster node, not the pod limit;
+          # 20 parallel Debug compiles overran the pod and stalled its node
+          cmake --build . -j 3
 
       - name: Slim unit tests
         run: ./bin/chatterino-test --gtest_filter='Slim*:InstanceServer*:Notebook*'
