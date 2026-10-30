@@ -1,0 +1,47 @@
+# Builds chatterino-slim from the checkout this file is in, against the
+# system Qt (native Wayland). Rebuild after Qt updates: Chatterino uses Qt's
+# private GUI API, which has no stable ABI.
+#
+#   git clone --recurse-submodules https://github.com/beastyrabbit/chatterino-slim.git
+#   cd chatterino-slim/packaging/arch && makepkg -si
+
+pkgname=chatterino-slim
+pkgver=0
+pkgrel=1
+pkgdesc='Chatterino 2 with a slim, chat-only layout and shared instances'
+arch=('x86_64')
+url='https://github.com/beastyrabbit/chatterino-slim'
+license=('MIT')
+depends=('qt6-base' 'qt6-imageformats' 'qt6-svg' 'qt6-wayland' 'libnotify'
+         'openssl' 'boost-libs' 'hunspell')
+makedepends=('git' 'cmake' 'ninja' 'boost' 'pkgconf')
+optdepends=('streamlink: watch streams from Chatterino')
+provides=('chatterino2')
+conflicts=('chatterino2' 'chatterino2-git' 'chatterino2-bin' 'chatterino2-appimage')
+
+_root=$(realpath "$startdir/../..")
+
+pkgver() {
+    local tag
+    if tag=$(git -C "$_root" describe --tags --match 'v*-slim-*' 2>/dev/null); then
+        # v2.5.6-slim-alpha.1-3-gabc1234 -> 2.5.6.slim.alpha.1.r3.gabc1234
+        sed 's/^v//; s/-slim-/.slim./; s/-/.r/; s/-/./g' <<<"$tag"
+    else
+        printf '0.r%s.g%s' "$(git -C "$_root" rev-list --count HEAD)" \
+            "$(git -C "$_root" rev-parse --short HEAD)"
+    fi
+}
+
+build() {
+    cmake -S "$_root" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCHATTERINO_UPDATER=OFF \
+        -DCHATTERINO_PLUGINS=ON
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 "$_root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

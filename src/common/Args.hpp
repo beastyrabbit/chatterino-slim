@@ -34,6 +34,18 @@ class Paths;
 /// -a, --activate=t:channel
 ///     --safe-mode
 ///
+/// Slim layout:
+///     --slim
+///     --hide-split-header
+///     --hide-header-buttons
+///     --hide-add-tab-button
+///     --hide-single-tab
+///     --fill-tabs
+///
+/// Shared instance:
+///     --instance=name
+///     --remove=t:channel1;t:channel2;...
+///
 /// See documentation on `QGuiApplication` for documentation on Qt arguments like -platform.
 class Args
 {
@@ -45,6 +57,9 @@ public:
 
     Args() = default;
     explicit Args(const QApplication &app);
+    /// Parses `arguments` as given on the command line, starting with the
+    /// program name
+    explicit Args(const QStringList &arguments);
 
     bool printVersion{};
 
@@ -64,6 +79,21 @@ public:
     bool dontLoadMainWindow{};
     std::vector<Channel> customChannels;
     std::optional<Channel> activateChannel;
+
+    /// Slim layout options turned on for this session only. They act as if
+    /// the matching setting were enabled, without saving it.
+    struct Slim {
+        bool hideSplitHeader{};
+        bool hideHeaderButtons{};
+        bool hideAddTabButton{};
+        bool hideSingleTab{};
+        bool fillTabWidth{};
+    } slim;
+
+    /// Name of a shared instance. A later launch with the same name hands its
+    /// --channels and --remove to the running instance instead of starting.
+    std::optional<QString> instanceName;
+    std::vector<Channel> removeChannels;
     std::optional<QString> initialLogin;
     bool verbose{};
     bool safeMode{};

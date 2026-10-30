@@ -27,6 +27,7 @@
 #include "providers/twitch/eventsub/Controller.hpp"
 #include "providers/twitch/TwitchBadges.hpp"
 #include "singletons/ImageUploader.hpp"
+#include "singletons/InstanceServer.hpp"
 #include "singletons/NativeMessaging.hpp"
 #ifdef CHATTERINO_HAVE_PLUGINS
 #    include "controllers/plugins/PluginController.hpp"
@@ -213,8 +214,9 @@ void Application::initialize(Settings &settings, const Paths &paths)
 {
     assert(!this->initialized);
 
-    // Show changelog
-    if (!this->args_.isFramelessEmbed &&
+    // Show changelog. Sessions that don't save settings could never record
+    // the answer, so they would ask on every start.
+    if (!this->args_.isFramelessEmbed && !this->args_.dontSaveSettings &&
         getSettings()->currentVersion.getValue() != "" &&
         getSettings()->currentVersion.getValue() != CHATTERINO_VERSION)
     {
@@ -238,6 +240,12 @@ void Application::initialize(Settings &settings, const Paths &paths)
     this->accounts->load();
 
     this->windows->initialize();
+
+    if (this->args_.instanceName)
+    {
+        this->instanceServer =
+            std::make_unique<InstanceServer>(*this->args_.instanceName);
+    }
 
     this->ffzBadges->load();
 

@@ -210,7 +210,12 @@ void Window::addLayout()
     layout->setContentsMargins(0, 0, 0, 0);
 
     this->notebook_->setAllowUserTabManagement(true);
-    this->notebook_->setShowAddButton(true);
+    getSettings()->hideAddTabButton.connect(
+        [this](bool hide) {
+            this->notebook_->setShowAddButton(
+                !hide && !getApp()->getArgs().slim.hideAddTabButton);
+        },
+        this->signalHolder_);
 }
 
 void Window::addCustomTitlebarButtons()

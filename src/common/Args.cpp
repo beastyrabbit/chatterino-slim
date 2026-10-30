@@ -133,6 +133,11 @@ std::vector<Args::Channel> parseCustomChannels(const QString &argValue)
 namespace chatterino {
 
 Args::Args(const QApplication &app)
+    : Args(app.arguments())
+{
+}
+
+Args::Args(const QStringList &arguments)
 {
     QCommandLineParser parser;
     parser.setApplicationDescription("Chatterino 2 Client for Twitch Chat");
@@ -194,6 +199,36 @@ Args::Args(const QApplication &app)
         "portable-dir", "Directory to use when portable mode is enabled.",
         "directory");
 
+    // Slim layout, for this session only
+    QCommandLineOption slimOption(
+        "slim", "Shows only chat and input for this session: implies "
+                "--hide-split-header, --hide-header-buttons, "
+                "--hide-add-tab-button, --hide-single-tab and --fill-tabs.");
+    QCommandLineOption hideSplitHeaderOption(
+        "hide-split-header",
+        "Hides the bar with the channel name above each chat.");
+    QCommandLineOption hideHeaderButtonsOption(
+        "hide-header-buttons",
+        "Hides the preferences and user buttons next to the tabs.");
+    QCommandLineOption hideAddTabButtonOption(
+        "hide-add-tab-button", "Hides the button that adds a tab.");
+    QCommandLineOption hideSingleTabOption(
+        "hide-single-tab", "Hides the tab bar while only one tab is open.");
+    QCommandLineOption fillTabsOption(
+        "fill-tabs", "Stretches tabs to fill the width of the window.");
+
+    QCommandLineOption instanceOption(
+        "instance",
+        "Names this Chatterino as a shared instance. If an instance with this "
+        "name is already running, --channels opens those channels in it as "
+        "tabs and --remove closes them, and this process exits.",
+        "name");
+    QCommandLineOption removeOption(
+        "remove",
+        "With --instance: closes the tabs of these channels in the running "
+        "instance. Closing its last tab quits it.",
+        "t:channel1;t:channel2;...");
+
 #ifndef NDEBUG
     QCommandLineOption useLocalEventsubOption(
         "use-local-eventsub",
@@ -215,12 +250,20 @@ Args::Args(const QApplication &app)
         useOldScalingOption,
         portableEnable,
         portableDirectory,
+        slimOption,
+        hideSplitHeaderOption,
+        hideHeaderButtonsOption,
+        hideAddTabButtonOption,
+        hideSingleTabOption,
+        fillTabsOption,
+        instanceOption,
+        removeOption,
 #ifndef NDEBUG
         useLocalEventsubOption,
 #endif
     });
 
-    if (!parser.parse(app.arguments()))
+    if (!parser.parse(arguments))
     {
         qCWarning(chatterinoArgs)
             << "Unhandled options:" << parser.unknownOptionNames();
@@ -302,6 +345,37 @@ Args::Args(const QApplication &app)
             QDir(parser.value(portableDirectory)).absolutePath();
     }
 
+    const bool slim = parser.isSet(slimOption);
+    this->slim = {
+        .hideSplitHeader = slim || parser.isSet(hideSplitHeaderOption),
+        .hideHeaderButtons = slim || parser.isSet(hideHeaderButtonsOption),
+        .hideAddTabButton = slim || parser.isSet(hideAddTabButtonOption),
+        .hideSingleTab = slim || parser.isSet(hideSingleTabOption),
+        .fillTabWidth = slim || parser.isSet(fillTabsOption),
+    };
+
+    if (parser.isSet(instanceOption))
+    {
+        static const QRegularExpression validName("^[A-Za-z0-9_-]{1,64}$");
+        auto name = parser.value(instanceOption);
+        if (validName.match(name).hasMatch())
+        {
+            this->instanceName = name;
+        }
+        else
+        {
+            qCWarning(chatterinoArgs)
+                << "Ignoring invalid instance name (allowed: letters, digits, "
+                   "'_' and '-'):"
+                << name;
+        }
+    }
+
+    if (parser.isSet(removeOption))
+    {
+        this->removeChannels = parseCustomChannels(parser.value(removeOption));
+    }
+
 #ifndef NDEBUG
     if (parser.isSet(useLocalEventsubOption))
     {
@@ -309,13 +383,21 @@ Args::Args(const QApplication &app)
     }
 #endif
 
-    this->currentArguments_ = extractCommandLine(parser, {
-                                                             verboseOption,
-                                                             safeModeOption,
-                                                             loginOption,
-                                                             channelLayout,
-                                                             activateOption,
-                                                         });
+    this->currentArguments_ =
+        extractCommandLine(parser, {
+                                       verboseOption,
+                                       safeModeOption,
+                                       loginOption,
+                                       channelLayout,
+                                       activateOption,
+                                       slimOption,
+                                       hideSplitHeaderOption,
+                                       hideHeaderButtonsOption,
+                                       hideAddTabButtonOption,
+                                       hideSingleTabOption,
+                                       fillTabsOption,
+                                       instanceOption,
+                                   });
 }
 
 QStringList Args::currentArguments() const

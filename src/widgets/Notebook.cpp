@@ -706,7 +706,6 @@ void Notebook::setShowTabs(bool value)
 {
     this->showTabs_ = value;
 
-    this->setShowAddButton(value);
     this->performLayout();
 
     this->updateTabVisibility();
@@ -719,6 +718,30 @@ void Notebook::setGrowWrappedNotebookLines(bool value)
         this->growWrappedNotebookLines = value;
         this->performLayout();
     }
+}
+
+void Notebook::setHideSingleTab(bool value)
+{
+    if (this->hideSingleTab_ != value)
+    {
+        this->hideSingleTab_ = value;
+        this->refresh();
+    }
+}
+
+void Notebook::setFillTabWidth(bool value)
+{
+    if (this->fillTabWidth_ != value)
+    {
+        this->fillTabWidth_ = value;
+        this->performLayout();
+    }
+}
+
+bool Notebook::tabsShown() const
+{
+    return this->showTabs_ &&
+           !(this->hideSingleTab_ && this->getVisibleTabCount() <= 1);
 }
 
 void Notebook::refresh()
@@ -749,8 +772,6 @@ bool Notebook::getShowAddButton() const
 void Notebook::setShowAddButton(bool value)
 {
     this->showAddButton_ = value;
-
-    this->addButton_->setHidden(!value);
 
     this->refresh();
 }
@@ -802,14 +823,21 @@ void Notebook::performLayout(bool animated)
     const auto scale = this->scale();
     const auto tabHeight = int(NOTEBOOK_TAB_HEIGHT * scale);
     const auto spacing = static_cast<int>(2 * this->scale());
+    const bool showTabs = this->tabsShown();
+    // The add button belongs to the tab row
+    const bool showAddButton = showTabs && this->showAddButton_;
+    this->addButton_->setHidden(!showAddButton);
     const LayoutContext ctx{
         .left = spacing,
         .right = this->width() - spacing,
         .bottom = this->height(),
         .scale = scale,
         .tabHeight = tabHeight,
-        .minimumTabAreaSpace = static_cast<int>(tabHeight * 0.5),
-        .addButtonWidth = this->showAddButton_ ? tabHeight : 0,
+        // Hidden tabs leave no empty strip behind
+        .minimumTabAreaSpace = showTabs ? static_cast<int>(tabHeight * 0.5) : 0,
+        .showTabs = showTabs,
+        .showAddButton = showAddButton,
+        .addButtonWidth = showAddButton ? tabHeight : 0,
         .lineThickness = spacing,
         .tabSpacer = std::max(1, static_cast<int>(scale)),
         .buttonWidth = tabHeight,
@@ -827,7 +855,13 @@ void Notebook::performLayout(bool animated)
         this->performVerticalLayout(ctx, animated);
     }
 
-    if (this->showTabs_)
+    if (this->hideSingleTab_)
+    {
+        // Adding or removing a page can show or hide the whole tab row
+        this->updateTabVisibility();
+    }
+
+    if (showTabs)
     {
         // raise elements
         for (auto &i : this->items_)
@@ -835,7 +869,7 @@ void Notebook::performLayout(bool animated)
             i.tab->raise();
         }
 
-        if (this->showAddButton_)
+        if (showAddButton)
         {
             this->addButton_->raise();
         }
@@ -868,20 +902,32 @@ void Notebook::performHorizontalLayout(const LayoutContext &ctx, bool animated)
         consumedButtonHeights = ctx.tabHeight;
     }
 
-    if (this->showTabs_)
+    if (ctx.showTabs)
     {
+        const bool growLines =
+            this->growWrappedNotebookLines || this->fillTabWidth_;
         auto layoutWrappedLine = [&](std::span<Item> line, int x, const int y,
-                                     int accumulatedWidth) {
-            if (line.empty() || !this->growWrappedNotebookLines)
+                                     int accumulatedWidth, const int right) {
+            if (line.empty() || !growLines)
             {
                 return;
             }
-            int widthPerItem = (ctx.right - x - accumulatedWidth) /
-                               static_cast<int>(line.size());
+            const auto count = static_cast<int>(line.size());
+            int widthPerItem = (right - x - accumulatedWidth) / count;
+            // Stretched tabs share the row evenly when every title fits
+            const int equalWidth =
+                (right - x - ctx.tabSpacer * (count - 1)) / count;
+            const bool equalWidths =
+                this->fillTabWidth_ &&
+                std::ranges::all_of(line, [&](const Item &item) {
+                    return item.tab->minimumTabWidth() <= equalWidth;
+                });
 
             for (Item &item : line.subspan(0, line.size() - 1))
             {
-                int itemWidth = item.tab->minimumTabWidth() + widthPerItem;
+                int itemWidth =
+                    equalWidths ? equalWidth
+                                : item.tab->minimumTabWidth() + widthPerItem;
                 item.tab->growWidth(itemWidth);
                 item.tab->queueMove(QPoint(x, y), animated);
                 x += itemWidth + ctx.tabSpacer;
@@ -889,7 +935,7 @@ void Notebook::performHorizontalLayout(const LayoutContext &ctx, bool animated)
 
             Item &lastItem = line.back();
             // The last item gets all the breadcrumbs from rounding down.
-            int lastItemWidth = ctx.right - x;
+            int lastItemWidth = right - x;
             lastItem.tab->growWidth(lastItemWidth);
             lastItem.tab->queueMove(QPoint(x, y), animated);
         };
@@ -909,7 +955,7 @@ void Notebook::performHorizontalLayout(const LayoutContext &ctx, bool animated)
             {
                 int accumulatedWidth = x - rowXStart;
                 layoutWrappedLine({rowStart, &item}, rowXStart, y,
-                                  accumulatedWidth);
+                                  accumulatedWidth, ctx.right);
                 y += item.tab->height() * reverse;
                 x = ctx.left;
                 rowXStart = x;
@@ -920,6 +966,15 @@ void Notebook::performHorizontalLayout(const LayoutContext &ctx, bool animated)
             item.tab->growWidth(0);
             item.tab->queueMove(QPoint(x, y), animated);
             x += item.tab->minimumTabWidth() + ctx.tabSpacer;
+        }
+
+        if (this->fillTabWidth_ && rowStart != nullptr)
+        {
+            // Stretch the last row too, leaving room for the add button
+            auto lastRow = ctx.items.subspan(rowStart - ctx.items.data());
+            layoutWrappedLine(lastRow, rowXStart, y, x - rowXStart,
+                              ctx.right - ctx.addButtonWidth);
+            x = ctx.right - ctx.addButtonWidth;
         }
 
         /// Update which tabs are in the last row
@@ -936,7 +991,7 @@ void Notebook::performHorizontalLayout(const LayoutContext &ctx, bool animated)
         }
 
         // move misc buttons
-        if (this->showAddButton_)
+        if (ctx.showAddButton)
         {
             this->addButton_->move(x, y);
         }
@@ -945,6 +1000,24 @@ void Notebook::performHorizontalLayout(const LayoutContext &ctx, bool animated)
         {
             y += ctx.tabHeight;
         }
+    }
+
+    // Without tabs or buttons, the page takes the whole notebook
+    const bool hasTabArea = ctx.showTabs || consumedButtonHeights > 0;
+    if (this->showDividerLine_ != hasTabArea)
+    {
+        this->showDividerLine_ = hasTabArea;
+        this->update();
+    }
+    if (!hasTabArea)
+    {
+        if (this->selectedPage_ != nullptr)
+        {
+            this->selectedPage_->move(0, 0);
+            this->selectedPage_->resize(this->width(), this->height());
+            this->selectedPage_->raise();
+        }
+        return;
     }
 
     if (isBottom)
@@ -1058,11 +1131,11 @@ void Notebook::performVerticalLayout(const LayoutContext &ctx, bool animated)
     {
         return;
     }
-    int count = ctx.items.size() + (this->showAddButton_ ? 1 : 0);
+    int count = ctx.items.size() + (ctx.showAddButton ? 1 : 0);
     int columnCount = ceil((float)count / tabsPerColumn);
 
     // only add width of all the tabs if they are not hidden
-    if (this->showTabs_)
+    if (ctx.showTabs)
     {
         for (int col = 0; col < columnCount; col++)
         {
@@ -1079,7 +1152,7 @@ void Notebook::performVerticalLayout(const LayoutContext &ctx, bool animated)
                     std::max(ctx.items[i].tab->minimumTabWidth(), largestWidth);
             }
 
-            if (isLastColumn && this->showAddButton_)
+            if (isLastColumn && ctx.showAddButton)
             {
                 largestWidth =
                     std::max(largestWidth, this->addButton_->width());
@@ -1121,7 +1194,7 @@ void Notebook::performVerticalLayout(const LayoutContext &ctx, bool animated)
                 y += ctx.tabHeight + ctx.tabSpacer;
             }
 
-            if (isLastColumn && this->showAddButton_)
+            if (isLastColumn && ctx.showAddButton)
             {
                 this->addButton_->move(x, y);
             }
@@ -1260,6 +1333,11 @@ void Notebook::paintEvent(QPaintEvent *event)
     if (this->tabLocation_ == NotebookTabLocation::Top ||
         this->tabLocation_ == NotebookTabLocation::Bottom)
     {
+        if (!this->showDividerLine_)
+        {
+            return;
+        }
+
         /// horizontal line
         painter.fillRect(0, this->lineOffset_, this->width(), int(2 * scale),
                          this->theme->tabs.dividerLine);
@@ -1352,7 +1430,7 @@ void Notebook::setTabVisibilityFilter(TabVisibilityFilter filter)
 
 bool Notebook::shouldShowTab(const NotebookTab *tab) const
 {
-    if (!this->showTabs_)
+    if (!this->tabsShown())
     {
         return false;
     }
@@ -1406,6 +1484,7 @@ SplitNotebook::SplitNotebook(Window *parent)
     QObject::connect(this->showAllTabsAction, &QAction::triggered, this,
                      [this] {
                          this->setShowTabs(true);
+                         getSettings()->hideAllTabs.setValue(false);
                          getSettings()->tabVisibility.setValue(
                              NotebookTabVisibility::AllTabs);
                          this->showAllTabsAction->setChecked(true);
@@ -1420,6 +1499,7 @@ SplitNotebook::SplitNotebook(Window *parent)
     QObject::connect(this->onlyShowLiveTabsAction, &QAction::triggered, this,
                      [this] {
                          this->setShowTabs(true);
+                         getSettings()->hideAllTabs.setValue(false);
                          getSettings()->tabVisibility.setValue(
                              NotebookTabVisibility::LiveOnly);
                          this->onlyShowLiveTabsAction->setChecked(true);
@@ -1434,6 +1514,7 @@ SplitNotebook::SplitNotebook(Window *parent)
     QObject::connect(this->hideAllTabsAction, &QAction::triggered, this,
                      [this] {
                          this->setShowTabs(false);
+                         getSettings()->hideAllTabs.setValue(true);
                          getSettings()->tabVisibility.setValue(
                              NotebookTabVisibility::AllTabs);
                          this->hideAllTabsAction->setChecked(true);
@@ -1462,6 +1543,13 @@ SplitNotebook::SplitNotebook(Window *parent)
             this->onlyShowLiveTabsAction->setChecked(true);
         }
         break;
+    }
+
+    // Restore hidden tabs without the "you've just hidden your tabs" popup
+    if (getSettings()->hideAllTabs)
+    {
+        Notebook::setShowTabs(false);
+        this->hideAllTabsAction->setChecked(true);
     }
 
     getSettings()->tabVisibility.connect(
@@ -1540,6 +1628,18 @@ SplitNotebook::SplitNotebook(Window *parent)
         },
         this->signalHolder_, true);
 
+    const auto &slim = getApp()->getArgs().slim;
+    getSettings()->hideSingleTab.connect(
+        [this, &slim](bool value) {
+            this->setHideSingleTab(value || slim.hideSingleTab);
+        },
+        this->signalHolder_, true);
+    getSettings()->fillTabWidth.connect(
+        [this, &slim](bool value) {
+            this->setFillTabWidth(value || slim.fillTabWidth);
+        },
+        this->signalHolder_, true);
+
     // Load lock notebook layout state from settings
     this->setLockNotebookLayout(getSettings()->lockNotebookLayout.getValue());
 }
@@ -1603,12 +1703,14 @@ void SplitNotebook::addCustomButtons()
     else
     {
         settingsBtn->setVisible(
-            !getSettings()->hidePreferencesButton.getValue());
+            !getSettings()->hidePreferencesButton.getValue() &&
+            !getApp()->getArgs().slim.hideHeaderButtons);
 
         getSettings()->hidePreferencesButton.connect(
             [this, settingsBtn](bool hide) {
                 auto oldVisibility = settingsBtn->isVisible();
-                auto newVisibility = !hide;
+                auto newVisibility =
+                    !hide && !getApp()->getArgs().slim.hideHeaderButtons;
                 settingsBtn->setVisible(newVisibility);
                 if (oldVisibility != newVisibility)
                 {
@@ -1635,11 +1737,13 @@ void SplitNotebook::addCustomButtons()
     auto *userBtn = this->addCustomButton<SvgButton>(normalAccountSrc);
     userBtn->setPadding({0, 0});
 
-    userBtn->setVisible(!getSettings()->hideUserButton.getValue());
+    userBtn->setVisible(!getSettings()->hideUserButton.getValue() &&
+                        !getApp()->getArgs().slim.hideHeaderButtons);
     getSettings()->hideUserButton.connect(
         [this, userBtn](bool hide) {
             auto oldVisibility = userBtn->isVisible();
-            auto newVisibility = !hide;
+            auto newVisibility =
+                !hide && !getApp()->getArgs().slim.hideHeaderButtons;
             userBtn->setVisible(newVisibility);
             if (oldVisibility != newVisibility)
             {
@@ -1664,7 +1768,8 @@ void SplitNotebook::addCustomButtons()
         [this, userBtn, normalAccountSrc] {
             userBtn->setSource(normalAccountSrc);
             auto oldVisibility = userBtn->isVisible();
-            auto newVisibility = !getSettings()->hideUserButton.getValue();
+            auto newVisibility = !getSettings()->hideUserButton.getValue() &&
+                                 !getApp()->getArgs().slim.hideHeaderButtons;
             userBtn->setVisible(newVisibility);
             if (oldVisibility != newVisibility)
             {

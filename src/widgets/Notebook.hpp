@@ -142,6 +142,8 @@ protected:
     virtual void setShowTabs(bool value);
 
     void setGrowWrappedNotebookLines(bool value);
+    void setHideSingleTab(bool value);
+    void setFillTabWidth(bool value);
 
     void scaleChangedEvent(float scale_) override;
     void resizeEvent(QResizeEvent *) override;
@@ -207,6 +209,8 @@ private:
         float scale = 0;
         int tabHeight = 0;
         int minimumTabAreaSpace = 0;
+        bool showTabs = false;
+        bool showAddButton = false;
         int addButtonWidth = 0;
         int lineThickness = 0;
         int tabSpacer = 0;
@@ -225,6 +229,9 @@ private:
      **/
     void updateTabVisibility();
     void resizeAddButton();
+
+    /// Whether the tab row is shown, taking hideSingleTab_ into account
+    bool tabsShown() const;
 
     bool containsPage(QWidget *page) const;
     std::optional<Item> findItem(QWidget *page);
@@ -252,6 +259,9 @@ private:
     int mouseWheelDelta_ = 0;
     bool lockNotebookLayout_ = false;
     bool growWrappedNotebookLines = false;
+    bool hideSingleTab_ = false;
+    bool fillTabWidth_ = false;
+    bool showDividerLine_ = true;
 
     bool refreshPaused_ = false;
     bool refreshRequested_ = false;

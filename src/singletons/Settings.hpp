@@ -236,6 +236,10 @@ public:
         "/appearance/tabVisibility",
         NotebookTabVisibility::AllTabs,
     };
+    BoolSetting hideAllTabs = {"/appearance/hideAllTabs", false};
+    BoolSetting hideSingleTab = {"/appearance/hideSingleTab", false};
+    BoolSetting fillTabWidth = {"/appearance/fillTabWidth", false};
+    BoolSetting hideAddTabButton = {"/appearance/hideAddTabButton", false};
     BoolSetting growWrappedNotebookLines = {
         "/appearance/growWrappedNotebookLines",
         false,
@@ -286,6 +290,7 @@ public:
                                      false};
     BoolSetting headerGame = {"/appearance/splitheader/showGame", false};
     BoolSetting headerUptime = {"/appearance/splitheader/showUptime", false};
+    BoolSetting hideSplitHeader = {"/appearance/splitheader/hide", false};
     FloatSetting customThemeMultiplier = {"/appearance/customThemeMultiplier",
                                           -0.5f};
     // BoolSetting useCustomWindowFrame = {"/appearance/useCustomWindowFrame",

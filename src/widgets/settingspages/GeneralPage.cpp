@@ -244,6 +244,17 @@ void GeneralPage::initLayout(GeneralPageView &layout)
         ->setTooltip("When horizontal tabs are wrapped, extend the line for "
                      "the whole width of the window.")
         ->addTo(layout);
+    SettingWidget::checkbox("Stretch tabs to the window width", s.fillTabWidth)
+        ->setTooltip("Horizontal tabs share the whole width of the window, "
+                     "which makes them easier to click.")
+        ->addTo(layout);
+    SettingWidget::checkbox("Hide tabs while only one is open", s.hideSingleTab)
+        ->setTooltip("The tab row appears once a second tab is opened.")
+        ->addTo(layout);
+    SettingWidget::inverseCheckbox("Show add tab button", s.hideAddTabButton)
+        ->setTooltip("Show the + button after the last tab. New tabs can "
+                     "still be opened with a hotkey.")
+        ->addTo(layout);
 
     layout.addWidget(new FontSettingWidget(s.chatFontFamily, s.chatFontSize,
                                            s.chatFontWeight),
@@ -1138,6 +1149,10 @@ void GeneralPage::initLayout(GeneralPageView &layout)
     layout.addTitle("Advanced");
 
     layout.addSubtitle("Chat title");
+    SettingWidget::inverseCheckbox("Show chat title", s.hideSplitHeader)
+        ->setTooltip("Show the bar with the channel name, its menu and its "
+                     "buttons above each chat")
+        ->addTo(layout);
     layout.addDescription("In live channels show:");
     SettingWidget::checkbox("Uptime", s.headerUptime)
         ->setTooltip("Show how long the channel has been live")

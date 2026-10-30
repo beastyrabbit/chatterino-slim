@@ -1,0 +1,201 @@
+---
+# Builds a chatterino-slim release for a v<version>-slim-<channel>.<n> tag and
+# publishes it as a GitHub release. Alpha and beta tags become pre-releases.
+name: Slim release
+
+on:
+  push:
+    tags:
+      - "v*-slim-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and publish"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slim-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  linux:
+    name: "Linux x86_64 (static Qt)"
+    runs-on: arc-chatterino-slim
+    # Same image upstream uses for its Ubuntu 22.04 package; glibc 2.35 keeps
+    # the binary running on older distributions too
+    container: ghcr.io/chatterino/chatterino2-build-ubuntu-22.04:latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check tag format
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-slim-[a-z]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$TAG' is not v<version>-slim-<channel>.<n>"
+            exit 1
+          fi
+        shell: bash
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fix git permission error
+        run: git config --global --add safe.directory '*'
+
+      - name: Build
+        run: |
+          mkdir build
+          cd build
+          CXXFLAGS=-fno-sized-deallocation cmake \
+            -DCMAKE_INSTALL_PREFIX=appdir/usr/ \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPAJLADA_SETTINGS_USE_BOOST_FILESYSTEM=On \
+            -DUSE_PRECOMPILED_HEADERS=OFF \
+            -DCMAKE_PREFIX_PATH="$Qt6_DIR/lib/cmake" \
+            -DCHATTERINO_STATIC_QT_BUILD=On \
+            -DCHATTERINO_NIGHTLY_BUILD=Off \
+            -DCHATTERINO_UPDATER=Off \
+            -DCHATTERINO_PLUGINS=On \
+            ..
+          make -j"$(nproc)"
+          make install
+
+      # Qt is static, but ICU is linked from Ubuntu 22.04 (soname 70), which
+      # other distributions don't ship
+      - name: Bundle ICU
+        working-directory: build
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -y --no-install-recommends install patchelf
+          mkdir -p appdir/usr/lib
+          for lib in $(ldd appdir/usr/bin/chatterino | awk '/libicu/ {print $3}'); do
+            cp -L "$lib" appdir/usr/lib/
+          done
+          cp -L "$(ldconfig -p | awk '/libicudata\.so\.70 / {print $NF; exit}')" appdir/usr/lib/
+          patchelf --set-rpath '$ORIGIN/../lib' appdir/usr/bin/chatterino
+          for lib in appdir/usr/lib/libicu*.so.*; do
+            patchelf --set-rpath '$ORIGIN' "$lib"
+          done
+
+      - name: Smoke test
+        timeout-minutes: 5
+        env:
+          SMOKE_QPA_PLATFORM: minimal
+        run: bash tests/slim/smoke.sh build/appdir/usr/bin/chatterino
+
+      - name: Package
+        shell: bash
+        run: |
+          name="chatterino-slim-$TAG-linux-x86_64"
+          mkdir -p "dist/$name"
+          cp -r build/appdir/usr/. "dist/$name/"
+          cp LICENSE README.md "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+
+      - name: Release notes
+        shell: bash
+        run: |
+          git fetch --no-tags https://github.com/Chatterino/chatterino2.git master
+          base=$(git merge-base HEAD FETCH_HEAD)
+          version=$(sed -n 's/^    VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt | head -n 1)
+          {
+            # The section for this tag if there is one, else "Unreleased"
+            section=$(awk -v tag="## $TAG" '
+              $0 == tag { on = 1; next }
+              on && /^## / { exit }
+              on { print }' SLIM_CHANGELOG.md)
+            if [[ -z "${section//[[:space:]]/}" ]]; then
+              section=$(awk '
+                $0 == "## Unreleased" { on = 1; next }
+                on && /^## / { exit }
+                on { print }' SLIM_CHANGELOG.md)
+            fi
+            echo "$section"
+            echo
+            echo "Based on Chatterino $version, upstream commit [\`${base:0:10}\`](https://github.com/Chatterino/chatterino2/commit/$base)."
+            echo
+            echo "The Linux archive has Qt built in (X11 only, so XWayland on Wayland desktops) and was tested on Ubuntu 22.04 and Arch Linux. Unpack it and run \`bin/chatterino\`. For native Wayland on Arch, build [packaging/arch/PKGBUILD](https://github.com/${{ github.repository }}/blob/$TAG/packaging/arch/PKGBUILD)."
+          } > dist/notes.md
+          cat dist/notes.md
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/notes.md
+
+  arch-smoke:
+    name: "Archive runs on Arch Linux"
+    needs: linux
+    runs-on: arc-chatterino-slim
+    container: archlinux:base
+    timeout-minutes: 20
+    steps:
+      - name: Install runtime libraries
+        run: |
+          pacman -Syu --noconfirm --needed libglvnd libxkbcommon-x11 xcb-util-cursor \
+            xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm \
+            fontconfig harfbuzz libnotify
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          sparse-checkout: tests/slim
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux
+          path: dist
+
+      - name: Smoke test
+        timeout-minutes: 5
+        env:
+          SMOKE_QPA_PLATFORM: minimal
+        run: |
+          tar -C dist -xzf dist/chatterino-slim-"$TAG"-linux-x86_64.tar.gz
+          bash tests/slim/smoke.sh dist/chatterino-slim-"$TAG"-linux-x86_64/bin/chatterino
+
+  publish:
+    name: "Publish release"
+    needs: [linux, arch-smoke]
+    runs-on: arc-chatterino-slim
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux
+          path: dist
+
+      - name: Pre-release?
+        id: kind
+        run: |
+          case "$TAG" in
+            *-slim-alpha.*|*-slim-beta.*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
+        with:
+          tag: ${{ env.TAG }}
+          name: chatterino-slim ${{ env.TAG }}
+          bodyFile: dist/notes.md
+          artifacts: "dist/*.tar.gz,dist/*.sha256"
+          prerelease: ${{ steps.kind.outputs.prerelease }}
+          makeLatest: ${{ steps.kind.outputs.prerelease == 'false' }}
+          allowUpdates: true
+          replacesArtifacts: true

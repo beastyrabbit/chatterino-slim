@@ -58,6 +58,7 @@ class ILinkResolver;
 class IStreamerMode;
 class ITwitchUsers;
 class NativeMessagingServer;
+class InstanceServer;
 namespace pronouns {
 class Pronouns;
 }  // namespace pronouns
@@ -256,6 +257,7 @@ private:
     void initNm(const Modes &modes, const Paths &paths);
 
     std::unique_ptr<NativeMessagingServer> nmServer;
+    std::unique_ptr<InstanceServer> instanceServer;
     Updates &updates;
 
     bool initialized{false};

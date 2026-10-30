@@ -5,6 +5,7 @@
 #include "widgets/splits/Split.hpp"
 
 #include "Application.hpp"
+#include "common/Args.hpp"
 #include "common/Common.hpp"
 #include "common/QLogging.hpp"
 #include "controllers/accounts/AccountController.hpp"
@@ -183,6 +184,13 @@ Split::Split(QWidget *parent)
     getSettings()->showEmptyInput.connect(
         [this] {
             this->refreshInputState(this->input_->getInputText());
+        },
+        this->signalHolder_);
+
+    getSettings()->hideSplitHeader.connect(
+        [this](bool hide) {
+            this->header_->setVisible(
+                !hide && !getApp()->getArgs().slim.hideSplitHeader);
         },
         this->signalHolder_);
 

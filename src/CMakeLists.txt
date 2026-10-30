@@ -567,6 +567,8 @@ set(SOURCE_FILES
         singletons/Fonts.hpp
         singletons/ImageUploader.cpp
         singletons/ImageUploader.hpp
+        singletons/InstanceServer.cpp
+        singletons/InstanceServer.hpp
         singletons/Logging.cpp
         singletons/Logging.hpp
         singletons/NativeMessaging.cpp

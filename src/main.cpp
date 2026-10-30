@@ -14,6 +14,7 @@
 #include "RunGui.hpp"
 #include "singletons/CrashHandler.hpp"
 #include "singletons/FileLogger.hpp"
+#include "singletons/InstanceServer.hpp"
 #include "singletons/Paths.hpp"
 #include "singletons/Settings.hpp"
 #include "singletons/Updates.hpp"
@@ -56,6 +57,10 @@ int main(int argc, char **argv)
 #endif
 
     const Args args(a);
+    if (InstanceServer::forward(args))
+    {
+        return 0;
+    }
     const Modes modes(args);
     std::unique_ptr<Paths> paths;
 

@@ -1,0 +1,146 @@
+---
+# Keeps chatterino-slim on top of upstream Chatterino.
+#
+# Upstream cuts each release on its own release/* branch from a master
+# commit. Merging release tags into this fork, which builds on upstream's
+# master, conflicts in
+# upstream's own files, so the sync merges the master commit the latest
+# release was cut from instead: a plain merge that only conflicts where the
+# slim changes do. A manual run can merge any upstream ref, such as master.
+#
+# A clean merge is tested with the Slim CI workflow, fast-forwarded onto
+# main and tagged as the next slim release. A conflicting merge, or one
+# that adds upstream workflows, fails the run and explains why in the run
+# summary.
+#
+# Needs the repository secret UPSTREAM_SYNC_TOKEN: a fine-grained token for
+# this repository with Contents and Workflows read/write. GITHUB_TOKEN can't
+# push upstream's workflow changes, and its pushes don't start the release.
+name: Slim upstream sync
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Upstream branch or tag to merge (empty: the master commit the latest release was cut from)"
+        required: false
+        default: ""
+        type: string
+      release:
+        description: "Tag a slim release after merging"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slim-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: "Merge upstream"
+    runs-on: arc-chatterino-slim
+    outputs:
+      branch: ${{ steps.merge.outputs.branch }}
+    steps:
+      - name: Check token
+        env:
+          TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Add the UPSTREAM_SYNC_TOKEN secret (see docs/dev/slim-fork.md)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+
+      - name: Merge
+        id: merge
+        env:
+          UPSTREAM_REF: ${{ inputs.ref }}
+        run: |
+          git config user.name "chatterino-slim sync"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          bash scripts/slim/merge-upstream.sh --push
+
+  test:
+    name: "Test merge"
+    needs: merge
+    if: needs.merge.outputs.branch != ''
+    uses: ./.github/workflows/slim-ci.yml
+    with:
+      ref: ${{ needs.merge.outputs.branch }}
+
+  publish:
+    name: "Merge into main and tag"
+    needs: [merge, test]
+    runs-on: arc-chatterino-slim
+    permissions:
+      contents: read
+      actions: write
+    env:
+      BRANCH: ${{ needs.merge.outputs.branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.merge.outputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+
+      - name: Fast-forward main
+        run: git push origin "HEAD:refs/heads/main"
+
+      # Upstream's workflows stay in the tree so merges stay clean, but must
+      # not run here. The merge script refuses merges that add workflows, so
+      # this only catches ones that were enabled by hand
+      - name: Disable upstream workflows
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const workflows = await github.paginate(
+              github.rest.actions.listRepoWorkflows,
+              { owner: context.repo.owner, repo: context.repo.repo });
+            for (const workflow of workflows) {
+              if (workflow.path.startsWith('.github/workflows/slim-') ||
+                  workflow.state !== 'active') {
+                continue;
+              }
+              core.info(`Disabling ${workflow.path}`);
+              await github.rest.actions.disableWorkflow({
+                owner: context.repo.owner, repo: context.repo.repo,
+                workflow_id: workflow.id,
+              });
+            }
+
+      - name: Tag release
+        # Scheduled runs have no inputs
+        if: github.event_name == 'schedule' || inputs.release
+        env:
+          CHANNEL: ${{ vars.SLIM_CHANNEL || 'alpha' }}
+        run: |
+          git config user.name "chatterino-slim sync"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # A rerun after a later failure must not tag the same commit twice
+          existing=$(git tag --points-at HEAD --list 'v*-slim-*' | head -n 1)
+          if [ -n "$existing" ]; then
+            echo "Already tagged $existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          tag=$(bash scripts/slim/next-tag.sh "$CHANNEL")
+          git tag -a "$tag" -m "chatterino-slim $tag"
+          # Pushed with the sync token so the release workflow starts
+          git push origin "$tag"
+          echo "Tagged $tag" >> "$GITHUB_STEP_SUMMARY"
+
+      # Last, so "Re-run failed jobs" still finds the branch
+      - name: Delete sync branch
+        run: git push origin --delete "$BRANCH"

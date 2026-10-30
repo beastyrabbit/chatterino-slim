@@ -1,0 +1,97 @@
+---
+# chatterino-slim CI: upstream's whole test suite plus the slim smoke test,
+# on the homelab ARC runner. Arch Linux with its system Qt is the closest
+# match to how the fork is used. Upstream's own workflows stay in the tree for
+# clean merges but are disabled in this repository.
+name: Slim CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit or branch to test"
+        required: true
+        type: string
+
+env:
+  TWITCH_PUBSUB_SERVER_TAG: v1.0.12
+  HTTPBOX_TAG: v0.2.1
+  QT_QPA_PLATFORM: minimal
+
+concurrency:
+  group: slim-ci-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: "Build and test"
+    # Fork pull requests must not reach the LAN-connected runner
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: arc-chatterino-slim
+    container: archlinux:base-devel
+    timeout-minutes: 90
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed qt6-base qt6-imageformats qt6-svg \
+            boost boost-libs libnotify hunspell pkgconf git cmake ninja
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || '' }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Fix git permission error
+        run: git config --global --add safe.directory '*'
+
+      - name: Install httpbox
+        run: |
+          curl -L -o httpbox.tar.xz "https://github.com/Chatterino/httpbox/releases/download/${{ env.HTTPBOX_TAG }}/httpbox-x86_64-unknown-linux-gnu.tar.xz"
+          tar -xJf httpbox.tar.xz
+          mv ./httpbox-x86_64-unknown-linux-gnu/httpbox /usr/local/bin
+        working-directory: /tmp
+
+      - name: Download Twitch PubSub test server
+        run: |
+          mkdir pubsub-server-test
+          curl -L -o pubsub-server.tar.gz "https://github.com/Chatterino/twitch-pubsub-server-test/releases/download/${{ env.TWITCH_PUBSUB_SERVER_TAG }}/server-${{ env.TWITCH_PUBSUB_SERVER_TAG }}-linux-amd64.tar.gz"
+          tar -xzf pubsub-server.tar.gz -C pubsub-server-test
+          rm pubsub-server.tar.gz
+
+      - name: Build
+        run: |
+          mkdir build-test
+          cd build-test
+          cmake -G Ninja \
+            -DBUILD_TESTS=On \
+            -DCHATTERINO_UPDATER=Off \
+            -DCMAKE_BUILD_TYPE=Debug \
+            ..
+          cmake --build . -j "$(nproc)"
+
+      - name: Slim unit tests
+        run: ./bin/chatterino-test --gtest_filter='Slim*:InstanceServer*:Notebook*'
+        working-directory: build-test
+
+      - name: Slim smoke test
+        timeout-minutes: 5
+        run: bash tests/slim/smoke.sh build-test/bin/chatterino
+
+      - name: Upstream test suite
+        timeout-minutes: 30
+        run: |
+          httpbox --port 9051 &
+          (cd ../pubsub-server-test && ./server 127.0.0.1:9050 127.0.0.1:9052) &
+          ctest --repeat until-pass:4 --output-on-failure
+        working-directory: build-test

@@ -1,0 +1,9 @@
+# chatterino-slim local hooks: `lefthook install`
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: gitleaks git --pre-commit --staged --redact --no-banner
+    clang-format:
+      glob: "*.{cpp,hpp,h,c}"
+      run: clang-format --dry-run --Werror {staged_files}
