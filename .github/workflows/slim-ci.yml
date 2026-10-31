@@ -1,8 +1,9 @@
 ---
 # chatterino-slim CI: upstream's whole test suite plus the slim smoke test,
-# on the homelab ARC runner. Arch Linux with its system Qt is the closest
-# match to how the fork is used. Upstream's own workflows stay in the tree for
-# clean merges but are disabled in this repository.
+# on the homelab ARC runner, in the image upstream's own tests use. Arch
+# packages are not used here: pacman downloads stalled on the cluster.
+# Upstream's own workflows stay in the tree for clean merges but are
+# disabled in this repository.
 name: Slim CI
 
 on:
@@ -36,16 +37,10 @@ jobs:
     # Fork pull requests must not reach the LAN-connected runner
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: arc-chatterino-slim
-    container: archlinux:base-devel
+    container: ghcr.io/chatterino/chatterino2-build-ubuntu-26.04:latest
     timeout-minutes: 90
 
     steps:
-      - name: Install dependencies
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed qt6-base qt6-imageformats qt6-svg \
-            boost boost-libs libnotify hunspell pkgconf git cmake ninja
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.event.pull_request.head.sha || '' }}
@@ -73,8 +68,10 @@ jobs:
         run: |
           mkdir build-test
           cd build-test
-          cmake -G Ninja \
+          cmake \
             -DBUILD_TESTS=On \
+            -DCMAKE_PREFIX_PATH="$Qt6_DIR/lib/cmake" \
+            -DCHATTERINO_STATIC_QT_BUILD=On \
             -DCHATTERINO_UPDATER=Off \
             -DCMAKE_BUILD_TYPE=Debug \
             ..
@@ -88,6 +85,8 @@ jobs:
 
       - name: Slim smoke test
         timeout-minutes: 5
+        env:
+          SMOKE_QPA_PLATFORM: minimal
         run: bash tests/slim/smoke.sh build-test/bin/chatterino
 
       - name: Upstream test suite

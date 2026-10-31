@@ -51,7 +51,7 @@ The window closes when its last tab is removed. The [user guide](docs/user/slim.
 
 chatterino-slim uses the same settings folder as Chatterino, so your accounts, highlights and layouts carry over. Don't run both at the same time.
 
-**Linux archive.** Each [release](https://github.com/beastyrabbit/chatterino-slim/releases) has a `linux-x86_64.tar.gz` with Qt built in. It is tested on Ubuntu 22.04 and Arch Linux. Unpack it and run `bin/chatterino`. It uses X11, so on Wayland it runs through XWayland.
+**Linux archive.** Each [release](https://github.com/beastyrabbit/chatterino-slim/releases) has a `linux-x86_64.tar.gz` with Qt built in. CI tests it on Ubuntu 22.04 and 26.04, and it was tested by hand on Arch Linux. Unpack it and run `bin/chatterino`. It uses X11, so on Wayland it runs through XWayland.
 
 **Arch Linux, native Wayland.** Build the package from a checkout:
 

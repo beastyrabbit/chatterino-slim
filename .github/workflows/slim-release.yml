@@ -126,7 +126,7 @@ jobs:
             echo
             echo "Based on Chatterino $version, upstream commit [\`${base:0:10}\`](https://github.com/Chatterino/chatterino2/commit/$base)."
             echo
-            echo "The Linux archive has Qt built in (X11 only, so XWayland on Wayland desktops) and was tested on Ubuntu 22.04 and Arch Linux. Unpack it and run \`bin/chatterino\`. For native Wayland on Arch, build [packaging/arch/PKGBUILD](https://github.com/${{ github.repository }}/blob/$TAG/packaging/arch/PKGBUILD)."
+            echo "The Linux archive has Qt built in (X11 only, so XWayland on Wayland desktops) and was tested on Ubuntu 22.04 and 26.04. Unpack it and run \`bin/chatterino\`. For native Wayland on Arch, build [packaging/arch/PKGBUILD](https://github.com/${{ github.repository }}/blob/$TAG/packaging/arch/PKGBUILD)."
           } > dist/notes.md
           cat dist/notes.md
 
@@ -138,19 +138,15 @@ jobs:
             dist/*.sha256
             dist/notes.md
 
-  arch-smoke:
-    name: "Archive runs on Arch Linux"
+  # A newer distribution with another ICU proves the bundled ICU is used.
+  # Arch packages are not used here: pacman downloads stalled on the cluster
+  newer-distro-smoke:
+    name: "Archive runs on Ubuntu 26.04"
     needs: linux
     runs-on: arc-chatterino-slim
-    container: archlinux:base
+    container: ghcr.io/chatterino/chatterino2-build-ubuntu-26.04:latest
     timeout-minutes: 20
     steps:
-      - name: Install runtime libraries
-        run: |
-          pacman -Syu --noconfirm --needed libglvnd libxkbcommon-x11 xcb-util-cursor \
-            xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm \
-            fontconfig harfbuzz libnotify
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ env.TAG }}
@@ -172,7 +168,7 @@ jobs:
 
   publish:
     name: "Publish release"
-    needs: [linux, arch-smoke]
+    needs: [linux, newer-distro-smoke]
     runs-on: arc-chatterino-slim
     permissions:
       contents: write

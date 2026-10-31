@@ -67,8 +67,8 @@ All fork workflows run on the self-hosted runner scale set `arc-chatterino-slim`
 
 | Workflow | Runs on | Does |
 | --- | --- | --- |
-| [Slim CI](../../.github/workflows/slim-ci.yml) | Pull requests, pushes to `main`, manual, called by the sync | Builds on Arch Linux with system Qt, runs the slim tests, the smoke test and upstream's whole test suite |
-| [Slim release](../../.github/workflows/slim-release.yml) | Tags `v*-slim-*`, manual | Builds the static Linux archive on Ubuntu 22.04, smoke-tests it there and on Arch Linux, publishes the GitHub release |
+| [Slim CI](../../.github/workflows/slim-ci.yml) | Pull requests, pushes to `main`, manual, called by the sync | Builds in upstream's Ubuntu 26.04 image, runs the slim tests, the smoke test and upstream's whole test suite |
+| [Slim release](../../.github/workflows/slim-release.yml) | Tags `v*-slim-*`, manual | Builds the static Linux archive on Ubuntu 22.04, smoke-tests it there and on Ubuntu 26.04, publishes the GitHub release |
 | [Slim upstream sync](../../.github/workflows/slim-upstream-sync.yml) | Daily, manual | Merges upstream, tests, fast-forwards `main`, tags a release |
 
 **Fork pull requests.** The runner sits in the home LAN, and a pull request from a fork can change or add workflow files, so the `if:` that makes Slim CI skip fork pull requests is only a safety net. The real gate is the repository setting that requires approval before workflows run for outside contributors (Settings → Actions → General → "Require approval for all external contributors"). Never approve a workflow run on a fork pull request. Check such pull requests out locally instead.
