@@ -110,10 +110,7 @@ jobs:
           fi
           read -r number head <<< "$(head -n 1 <<< "$prs")"
           echo "open=$number" >> "$GITHUB_OUTPUT"
-          # Enabling it may have failed when the PR was opened
-          if [ "$(gh pr view "$number" --json autoMergeRequest --jq '.autoMergeRequest == null')" = true ]; then
-            gh pr merge "$number" --auto --merge
-          fi
+          no_auto_merge=$(gh pr view "$number" --json autoMergeRequest --jq '.autoMergeRequest == null')
           git fetch --quiet origin "refs/heads/$head"
           git switch --quiet -C "$head" FETCH_HEAD
           if git merge-base --is-ancestor origin/main HEAD; then
@@ -127,6 +124,11 @@ jobs:
             git merge --abort
             echo "### Sync pull request #$number conflicts with main" >> "$GITHUB_STEP_SUMMARY"
             echo "result=update-conflict" >> "$GITHUB_OUTPUT"
+          fi
+          # Enabling it may have failed when the PR was opened. Last, because
+          # a PR that already passes merges, and its branch goes, right away
+          if [ "$no_auto_merge" = true ]; then
+            gh pr merge "$number" --auto --merge
           fi
 
       # Only one sync pull request at a time; a newer release follows once
