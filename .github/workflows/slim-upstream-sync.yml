@@ -102,12 +102,18 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          read -r number head < <(gh pr list --label upstream-sync --state open \
-            --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"' | head -n 1) || true
-          if [ -z "${number:-}" ]; then
+          # A failed query must fail the step, not look like no open PR
+          prs=$(gh pr list --label upstream-sync --state open \
+            --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"')
+          if [ -z "$prs" ]; then
             exit 0
           fi
+          read -r number head <<< "$(head -n 1 <<< "$prs")"
           echo "open=$number" >> "$GITHUB_OUTPUT"
+          # Enabling it may have failed when the PR was opened
+          if [ "$(gh pr view "$number" --json autoMergeRequest --jq '.autoMergeRequest == null')" = true ]; then
+            gh pr merge "$number" --auto --merge
+          fi
           git fetch --quiet origin "refs/heads/$head"
           git switch --quiet -C "$head" FETCH_HEAD
           if git merge-base --is-ancestor origin/main HEAD; then
@@ -234,7 +240,8 @@ jobs:
   master-test:
     name: "Master lane test"
     needs: master
-    if: needs.master.outputs.result == 'merged'
+    # Without a status check this would inherit a release lane failure
+    if: ${{ !cancelled() && needs.master.result == 'success' && needs.master.outputs.result == 'merged' }}
     uses: ./.github/workflows/slim-ci.yml
     with:
       ref: ${{ needs.master.outputs.branch }}
@@ -267,7 +274,7 @@ jobs:
 
   incidents:
     name: "Record incidents"
-    needs: [release, master, master-test]
+    needs: [release, master, master-test, master-done]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -286,6 +293,7 @@ jobs:
           MASTER_TARGET: ${{ needs.master.outputs.target }}
           MASTER_MAIN: ${{ needs.master.outputs.main }}
           MASTER_TEST: ${{ needs.master-test.result }}
+          MASTER_DONE: ${{ needs.master-done.result }}
         with:
           script: |
             const e = process.env;
@@ -307,7 +315,8 @@ jobs:
               },
               {
                 lane: 'master',
-                stage: stage(e.MASTER_JOB, e.MASTER_RESULT, e.MASTER_TEST),
+                stage: e.MASTER_DONE === 'failure' ? 'controller'
+                  : stage(e.MASTER_JOB, e.MASTER_RESULT, e.MASTER_TEST),
                 details: `Master lane: upstream master \`${e.MASTER_TARGET || '?'}\` into ` +
                   `main \`${e.MASTER_MAIN || '?'}\`, result \`${e.MASTER_RESULT || 'none'}\`, ` +
                   `test \`${e.MASTER_TEST}\``,

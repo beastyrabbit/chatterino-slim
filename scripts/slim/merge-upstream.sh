@@ -120,6 +120,7 @@ fi
 summary "Merged $label (${target:0:10}) into $branch."
 
 if $push; then
-    git push --quiet origin "$branch"
+    # The empty lease only creates the branch, even if it appeared meanwhile
+    git push --quiet --force-with-lease="refs/heads/$branch:" origin "$branch:refs/heads/$branch"
 fi
 output result merged
