@@ -106,7 +106,7 @@ When a conflict comes from upstream rewriting code the fork changes, port the fo
 
 ### Setup the sync needs
 
-- Repository secret `UPSTREAM_SYNC_TOKEN`: a fine-grained personal access token for this repository only, with **Contents** and **Workflows** read and write. `GITHUB_TOKEN` can't push upstream's workflow changes, and its tag pushes don't start other workflows.
+- `UPSTREAM_SYNC_TOKEN`: a fine-grained personal access token for this repository only, with **Contents** and **Workflows** read and write. `GITHUB_TOKEN` can't push upstream's workflow changes, and its tag pushes don't start other workflows. The token lives in Infisical, not in GitHub secrets: project `kub-homelab`, environment `prod`, path `/projects/chatterino-slim/ci`. The sync jobs read it through GitHub OIDC with the Infisical identity `github-actions-chatterino-slim`, whose ID is in the repository variable `INFISICAL_GITHUB_ACTIONS_IDENTITY_ID`. The identity accepts only workflow runs on `main` of this repository on the self-hosted runner, and it can only read that path.
 - Optional repository variable `SLIM_CHANNEL` (default `alpha`): the channel used in release tags.
 
 ## Releases
