@@ -67,7 +67,7 @@ Rebuild it after Qt updates. Chatterino uses Qt internals that change between Qt
 
 ## Staying current with upstream
 
-A scheduled workflow checks upstream Chatterino every day. When upstream publishes a release, it merges the upstream commit that release was cut from and opens a pull request. The full upstream test suite, the fork's own tests and a smoke test of the real binary run on it, and it merges itself and becomes a new release if everything passes. The same tests also run daily against upstream's newest code, the code its nightly builds are made from, so breakage shows up before upstream releases it. When something fails, an issue is opened and an AI agent tries to repair it within fixed limits; problems it can't solve are left for a human. [docs/dev/slim-fork.md](docs/dev/slim-fork.md) explains how this works.
+A scheduled workflow checks upstream Chatterino every day. When upstream publishes a release, it merges the upstream commit that release was cut from and opens a pull request. The full upstream test suite, the fork's own tests and a smoke test of the real binary run on it, and it merges itself and becomes a new release if everything passes. The same tests also run daily against upstream's newest code, the code its nightly builds are made from, so breakage shows up before upstream releases it. When something fails, an issue is opened and an AI agent starts right away to repair it within fixed limits; problems it can't solve are left for a human. [docs/dev/slim-fork.md](docs/dev/slim-fork.md) explains how this works.
 
 Release tags look like `v2.5.6-slim-alpha.1`: the Chatterino version the build is based on, then the fork's own channel and build number.
 

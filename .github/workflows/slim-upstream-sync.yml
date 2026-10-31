@@ -11,8 +11,9 @@
 # made from) into a throwaway branch and runs Slim CI on it, so breakage is
 # found before upstream releases it. It never touches main.
 #
-# Failures become one GitHub issue per lane and stage (label slim-incident).
-# A daily T3 Code task picks those up; see "Unattended repair" in the guide.
+# Failures become one GitHub issue per lane and stage (label slim-incident)
+# and fail the run. The failed run's webhook starts a T3 Code repair agent;
+# see "Unattended repair" in the guide.
 #
 # Writes use a token of the chatterino-slim-sync GitHub App (Contents,
 # Workflows and Pull requests read/write): GITHUB_TOKEN can't push upstream's
@@ -163,8 +164,8 @@ jobs:
               ...context.repo, base: 'main', head: BRANCH,
               title: `Merge ${LABEL} (${TARGET.slice(0, 10)})`,
               body: 'Opened by the upstream sync. It merges by itself once slim-gate passes, ' +
-                'and the merge is tagged as the next slim release. If it fails, the daily ' +
-                'repair task opens an agent thread: see [Unattended repair]' +
+                'and the merge is tagged as the next slim release. If it fails, a repair ' +
+                'agent starts: see [Unattended repair]' +
                 '(../blob/main/docs/dev/slim-fork.md#unattended-repair).',
             });
             await github.rest.issues.addLabels({
@@ -386,8 +387,11 @@ jobs:
                 await github.rest.issues.create({ owner, repo, labels: ['slim-incident'],
                   title: `Upstream sync: ${lane} lane fails at ${stage}`,
                   body: `${marker}\nThe daily upstream sync failed: ${run}\n\n${details}\n\n` +
-                    'The run summary has the details. The daily repair task works on this issue; ' +
+                    'The run summary has the details. The repair agent works on this issue; ' +
                     'see [Unattended repair](../blob/main/docs/dev/slim-fork.md#unattended-repair). ' +
                     'The issue closes itself once the lane passes again.' });
               }
             }
+            // A failed run is what starts the repair agent's webhook
+            const failing = lanes.filter(l => l.stage).map(l => `${l.lane} (${l.stage})`);
+            if (failing.length) core.setFailed(`Incidents recorded: ${failing.join(', ')}`);
