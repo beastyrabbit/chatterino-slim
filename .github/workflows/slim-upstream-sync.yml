@@ -13,12 +13,13 @@
 # that adds upstream workflows, fails the run and explains why in the run
 # summary.
 #
-# Needs UPSTREAM_SYNC_TOKEN, a fine-grained token for this repository with
-# Contents and Workflows read/write, in Infisical (kub-homelab, prod,
-# /projects/chatterino-slim/ci). The jobs read it over GitHub OIDC with the
-# identity in the INFISICAL_GITHUB_ACTIONS_IDENTITY_ID repository variable.
-# GITHUB_TOKEN can't push upstream's workflow changes, and its pushes don't
-# start the release.
+# Pushes with a token of the chatterino-slim-sync GitHub App (Contents and
+# Workflows read/write, installed on this repository only). GITHUB_TOKEN
+# can't push upstream's workflow changes, and its pushes don't start the
+# release. The app's client ID is the SYNC_APP_CLIENT_ID repository
+# variable. Its private key, SYNC_APP_PRIVATE_KEY, is in Infisical
+# (kub-homelab, prod, /projects/chatterino-slim/ci), read over GitHub OIDC
+# with the identity in the INFISICAL_GITHUB_ACTIONS_IDENTITY_ID variable.
 name: Slim upstream sync
 
 on:
@@ -54,7 +55,7 @@ jobs:
     outputs:
       branch: ${{ steps.merge.outputs.branch }}
     steps:
-      - name: Fetch sync token from Infisical
+      - name: Fetch app key from Infisical
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
@@ -64,18 +65,29 @@ jobs:
           env-slug: prod
           secret-path: /projects/chatterino-slim/ci
 
-      - name: Check token
+      - name: Check app setup
+        env:
+          CLIENT_ID: ${{ vars.SYNC_APP_CLIENT_ID }}
         run: |
-          if [ -z "${UPSTREAM_SYNC_TOKEN:-}" ]; then
-            echo "::error::Add UPSTREAM_SYNC_TOKEN to Infisical (see docs/dev/slim-fork.md)"
+          if [ -z "$CLIENT_ID" ] || [ -z "${SYNC_APP_PRIVATE_KEY:-}" ]; then
+            echo "::error::Set up the sync GitHub App (see docs/dev/slim-fork.md)"
             exit 1
           fi
+
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
+          private-key: ${{ env.SYNC_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ env.UPSTREAM_SYNC_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Merge
         id: merge
@@ -105,7 +117,7 @@ jobs:
     env:
       BRANCH: ${{ needs.merge.outputs.branch }}
     steps:
-      - name: Fetch sync token from Infisical
+      - name: Fetch app key from Infisical
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
@@ -115,11 +127,20 @@ jobs:
           env-slug: prod
           secret-path: /projects/chatterino-slim/ci
 
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
+          private-key: ${{ env.SYNC_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.merge.outputs.branch }}
           fetch-depth: 0
-          token: ${{ env.UPSTREAM_SYNC_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Fast-forward main
         run: git push origin "HEAD:refs/heads/main"
@@ -162,7 +183,7 @@ jobs:
           fi
           tag=$(bash scripts/slim/next-tag.sh "$CHANNEL")
           git tag -a "$tag" -m "chatterino-slim $tag"
-          # Pushed with the sync token so the release workflow starts
+          # Pushed with the app token so the release workflow starts
           git push origin "$tag"
           echo "Tagged $tag" >> "$GITHUB_STEP_SUMMARY"
 

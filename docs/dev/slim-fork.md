@@ -106,7 +106,8 @@ When a conflict comes from upstream rewriting code the fork changes, port the fo
 
 ### Setup the sync needs
 
-- `UPSTREAM_SYNC_TOKEN`: a fine-grained personal access token for this repository only, with **Contents** and **Workflows** read and write. `GITHUB_TOKEN` can't push upstream's workflow changes, and its tag pushes don't start other workflows. The token lives in Infisical, not in GitHub secrets: project `kub-homelab`, environment `prod`, path `/projects/chatterino-slim/ci`. The sync jobs read it through GitHub OIDC with the Infisical identity `github-actions-chatterino-slim`, whose ID is in the repository variable `INFISICAL_GITHUB_ACTIONS_IDENTITY_ID`. The identity accepts only workflow runs on `main` of this repository on the self-hosted runner, and it can only read that path.
+- GitHub App `chatterino-slim-sync`: private, no webhook, repository permissions **Contents** and **Workflows** read and write, installed on this repository only. The sync pushes with a token of this app that is valid for one hour. `GITHUB_TOKEN` can't push upstream's workflow changes, and its tag pushes don't start other workflows. The app's client ID is the repository variable `SYNC_APP_CLIENT_ID`.
+- The app's private key, `SYNC_APP_PRIVATE_KEY`, lives in Infisical, not in GitHub secrets: project `kub-homelab`, environment `prod`, path `/projects/chatterino-slim/ci`. The sync jobs read it through GitHub OIDC with the Infisical identity `github-actions-chatterino-slim`, whose ID is in the repository variable `INFISICAL_GITHUB_ACTIONS_IDENTITY_ID`. The identity accepts only workflow runs on `main` of this repository on the self-hosted runner, and it can only read that path. To replace the key, generate a new one on the app's settings page, store it with `infisical secrets set SYNC_APP_PRIVATE_KEY=@<file>.pem`, and delete the old key on GitHub.
 - Optional repository variable `SLIM_CHANNEL` (default `alpha`): the channel used in release tags.
 
 ## Releases
