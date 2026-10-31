@@ -53,7 +53,7 @@ jobs:
       result: ${{ steps.pr.outputs.result || steps.merge.outputs.result }}
       label: ${{ steps.merge.outputs.label }}
       target: ${{ steps.merge.outputs.target }}
-      pr: ${{ steps.pr.outputs.open || steps.open.outputs.number }}
+      pr: ${{ steps.open-pr.outputs.number || steps.open.outputs.number }}
     steps:
       - name: Fetch app key from Infisical
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
@@ -95,47 +95,53 @@ jobs:
           git config user.name "chatterino-slim sync"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # The runner has no gh CLI; github-script talks to the API instead.
+      # A failed query fails the step rather than looking like no open PR
+      - name: Find the open sync pull request
+        id: open-pr
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const prs = await github.paginate(github.rest.pulls.list,
+              { ...context.repo, state: 'open', per_page: 100 });
+            const pr = prs.find(p => p.labels.some(l => l.name === 'upstream-sync'));
+            if (pr) {
+              core.setOutput('number', pr.number);
+              core.setOutput('head', pr.head.ref);
+              core.setOutput('node-id', pr.node_id);
+              core.setOutput('auto-merge', pr.auto_merge ? 'on' : 'off');
+            }
+
       # Branch protection only merges pull requests that are current with
       # main, and auto-merge doesn't update them
       - name: Keep the open sync pull request current
         id: pr
+        if: steps.open-pr.outputs.number != ''
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NUMBER: ${{ steps.open-pr.outputs.number }}
+          HEAD: ${{ steps.open-pr.outputs.head }}
         run: |
-          # A failed query must fail the step, not look like no open PR
-          prs=$(gh pr list --label upstream-sync --state open \
-            --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"')
-          if [ -z "$prs" ]; then
-            exit 0
-          fi
-          read -r number head <<< "$(head -n 1 <<< "$prs")"
-          echo "open=$number" >> "$GITHUB_OUTPUT"
-          no_auto_merge=$(gh pr view "$number" --json autoMergeRequest --jq '.autoMergeRequest == null')
-          git fetch --quiet origin "refs/heads/$head"
-          git switch --quiet -C "$head" FETCH_HEAD
+          git fetch --quiet origin "refs/heads/$HEAD"
+          git switch --quiet -C "$HEAD" FETCH_HEAD
           if git merge-base --is-ancestor origin/main HEAD; then
-            echo "Sync pull request #$number is current with main." >> "$GITHUB_STEP_SUMMARY"
+            echo "Sync pull request #$NUMBER is current with main." >> "$GITHUB_STEP_SUMMARY"
             echo "result=pending" >> "$GITHUB_OUTPUT"
-          elif git merge --no-edit -m "Merge main into $head" origin/main; then
-            git push --quiet origin "HEAD:refs/heads/$head"
-            echo "Merged main into sync pull request #$number." >> "$GITHUB_STEP_SUMMARY"
+          elif git merge --no-edit -m "Merge main into $HEAD" origin/main; then
+            git push --quiet origin "HEAD:refs/heads/$HEAD"
+            echo "Merged main into sync pull request #$NUMBER." >> "$GITHUB_STEP_SUMMARY"
             echo "result=updated" >> "$GITHUB_OUTPUT"
           else
             git merge --abort
-            echo "### Sync pull request #$number conflicts with main" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Sync pull request #$NUMBER conflicts with main" >> "$GITHUB_STEP_SUMMARY"
             echo "result=update-conflict" >> "$GITHUB_OUTPUT"
-          fi
-          # Enabling it may have failed when the PR was opened. Last, because
-          # a PR that already passes merges, and its branch goes, right away
-          if [ "$no_auto_merge" = true ]; then
-            gh pr merge "$number" --auto --merge
           fi
 
       # Only one sync pull request at a time; a newer release follows once
       # the open one is merged
       - name: Merge upstream
         id: merge
-        if: steps.pr.outputs.open == ''
+        if: steps.open-pr.outputs.number == ''
         env:
           UPSTREAM_REF: ${{ inputs.ref }}
         # The incidents job reports a missing result
@@ -144,19 +150,51 @@ jobs:
       - name: Open pull request
         id: open
         if: steps.merge.outputs.result == 'merged' || steps.merge.outputs.result == 'exists'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BRANCH: ${{ steps.merge.outputs.branch }}
           LABEL: ${{ steps.merge.outputs.label }}
           TARGET: ${{ steps.merge.outputs.target }}
-        run: |
-          url=$(gh pr create --base main --head "$BRANCH" --label upstream-sync \
-            --title "Merge $LABEL (${TARGET:0:10})" \
-            --body "Opened by the upstream sync. It merges by itself once slim-gate passes, and the merge is tagged as the next slim release. If it fails, the daily repair task opens an agent thread: see [Unattended repair](../blob/main/docs/dev/slim-fork.md#unattended-repair).")
-          # A merge commit keeps upstream's history, which later syncs rely on
-          gh pr merge "$url" --auto --merge
-          echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
-          echo "Opened $url" >> "$GITHUB_STEP_SUMMARY"
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const { BRANCH, LABEL, TARGET } = process.env;
+            const { data: pr } = await github.rest.pulls.create({
+              ...context.repo, base: 'main', head: BRANCH,
+              title: `Merge ${LABEL} (${TARGET.slice(0, 10)})`,
+              body: 'Opened by the upstream sync. It merges by itself once slim-gate passes, ' +
+                'and the merge is tagged as the next slim release. If it fails, the daily ' +
+                'repair task opens an agent thread: see [Unattended repair]' +
+                '(../blob/main/docs/dev/slim-fork.md#unattended-repair).',
+            });
+            await github.rest.issues.addLabels({
+              ...context.repo, issue_number: pr.number, labels: ['upstream-sync'] });
+            core.setOutput('number', pr.number);
+            core.setOutput('node-id', pr.node_id);
+            await core.summary.addRaw(`Opened ${pr.html_url}\n`).write();
+
+      # Also retries when enabling failed on an earlier run. Last, because a
+      # pull request that already passes merges, and its branch goes, at once
+      - name: Turn on auto-merge
+        if: steps.open.outputs.number != '' || steps.open-pr.outputs.auto-merge == 'off'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          NUMBER: ${{ steps.open.outputs.number || steps.open-pr.outputs.number }}
+          NODE_ID: ${{ steps.open.outputs.node-id || steps.open-pr.outputs.node-id }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            // A merge commit keeps upstream's history, which later syncs rely on
+            try {
+              await github.graphql(`mutation($id: ID!) {
+                enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: MERGE}) {
+                  clientMutationId } }`, { id: process.env.NODE_ID });
+            } catch (error) {
+              // GitHub refuses auto-merge when the PR can merge right now
+              if (!/clean status/i.test(error.message)) throw error;
+              await github.rest.pulls.merge({ ...context.repo,
+                pull_number: Number(process.env.NUMBER), merge_method: 'merge' });
+            }
 
   master:
     name: "Master lane"
@@ -269,10 +307,12 @@ jobs:
           key: slim-master-lane-${{ needs.master.outputs.main }}-${{ needs.master.outputs.target }}
 
       - name: Delete test branch
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ needs.master.outputs.branch }}
-        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH"
+        with:
+          script: |
+            await github.rest.git.deleteRef({ ...context.repo, ref: `heads/${process.env.BRANCH}` });
 
   incidents:
     name: "Record incidents"
