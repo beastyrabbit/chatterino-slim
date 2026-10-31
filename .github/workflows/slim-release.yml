@@ -126,6 +126,12 @@ jobs:
             echo
             echo "Based on Chatterino $version, upstream commit [\`${base:0:10}\`](https://github.com/Chatterino/chatterino2/commit/$base)."
             echo
+            # Tags from slim-tag.yml name the upstream release they merged
+            merged=$(git tag --list --format='%(contents:body)' "$TAG")
+            if [[ -n "${merged//[[:space:]]/}" ]]; then
+              echo "$merged"
+              echo
+            fi
             echo "The Linux archive has Qt built in (X11 only, so XWayland on Wayland desktops) and was tested on Ubuntu 22.04 and 26.04. Unpack it and run \`bin/chatterino\`. For native Wayland on Arch, build [packaging/arch/PKGBUILD](https://github.com/${{ github.repository }}/blob/$TAG/packaging/arch/PKGBUILD)."
           } > dist/notes.md
           cat dist/notes.md

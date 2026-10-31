@@ -96,3 +96,18 @@ jobs:
           (cd ../pubsub-server-test && ./server 127.0.0.1:9050 127.0.0.1:9052) &
           ctest --repeat until-pass:4 --output-on-failure
         working-directory: build-test
+
+  # The one check main's branch protection requires. A skipped test job (a
+  # fork pull request) or a failed one fails the gate
+  gate:
+    name: "slim-gate"
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the tests to have passed
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: |
+          echo "Build and test: $RESULT"
+          [ "$RESULT" = success ]

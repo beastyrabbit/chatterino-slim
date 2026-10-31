@@ -1,0 +1,111 @@
+---
+# Tags each merged upstream-sync pull request (see slim-upstream-sync.yml) as
+# the next slim release. The tag is pushed with the sync app's token, so it
+# starts slim-release.yml; a GITHUB_TOKEN push wouldn't.
+name: Slim tag
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slim-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: "Tag sync merge"
+    runs-on: arc-chatterino-slim
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+      id-token: write
+    steps:
+      - name: Find the sync pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          title=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[] |
+            select(.merge_commit_sha == $ENV.SHA and .merged_at != null and
+                   any(.labels[]; .name == "upstream-sync")) | .title' | head -n 1)
+          if [ -z "$title" ]; then
+            echo "$SHA doesn't merge a sync pull request; nothing to tag." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch app key from Infisical
+        if: steps.pr.outputs.title != ''
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_GITHUB_ACTIONS_IDENTITY_ID }}
+          domain: "http://192.168.60.11:8080"
+          project-slug: kub-homelab
+          env-slug: prod
+          secret-path: /projects/chatterino-slim/ci
+
+      - name: Create app token
+        id: app-token
+        if: steps.pr.outputs.title != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
+          private-key: ${{ env.SYNC_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      # The merge itself, even if main has moved on since
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.pr.outputs.title != ''
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      # Upstream's workflows stay in the tree so merges stay clean, but must
+      # not run here. The merge script refuses merges that add workflows, so
+      # this only catches ones that were enabled by hand
+      - name: Disable upstream workflows
+        if: steps.pr.outputs.title != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const workflows = await github.paginate(
+              github.rest.actions.listRepoWorkflows,
+              { owner: context.repo.owner, repo: context.repo.repo });
+            for (const workflow of workflows) {
+              if (workflow.path.startsWith('.github/workflows/slim-') ||
+                  workflow.state !== 'active') {
+                continue;
+              }
+              core.info(`Disabling ${workflow.path}`);
+              await github.rest.actions.disableWorkflow({
+                owner: context.repo.owner, repo: context.repo.repo,
+                workflow_id: workflow.id,
+              });
+            }
+
+      - name: Tag release
+        if: steps.pr.outputs.title != ''
+        env:
+          CHANNEL: ${{ vars.SLIM_CHANNEL || 'alpha' }}
+          TITLE: ${{ steps.pr.outputs.title }}
+        run: |
+          git config user.name "chatterino-slim sync"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # A rerun must not tag the same commit twice
+          existing=$(git tag --points-at HEAD --list 'v*-slim-*' | head -n 1)
+          if [ -n "$existing" ]; then
+            echo "Already tagged $existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          tag=$(bash scripts/slim/next-tag.sh "$CHANNEL")
+          git tag -a "$tag" -m "chatterino-slim $tag" -m "$TITLE"
+          git push origin "$tag"
+          echo "Tagged $tag" >> "$GITHUB_STEP_SUMMARY"

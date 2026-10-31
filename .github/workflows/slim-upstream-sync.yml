@@ -1,25 +1,27 @@
 ---
-# Keeps chatterino-slim on top of upstream Chatterino.
+# Keeps chatterino-slim on top of upstream Chatterino without a human.
 #
-# Upstream cuts each release on its own release/* branch from a master
-# commit. Merging release tags into this fork, which builds on upstream's
-# master, conflicts in
-# upstream's own files, so the sync merges the master commit the latest
-# release was cut from instead: a plain merge that only conflicts where the
-# slim changes do. A manual run can merge any upstream ref, such as master.
+# Release lane: merges the upstream master commit the latest release was cut
+# from (merging release tags conflicts, see docs/dev/slim-fork.md) into an
+# upstream-sync/<commit> branch and opens a pull request that merges itself
+# once slim-gate passes. An open sync pull request is kept current with main
+# instead of starting another. slim-tag.yml tags the merge as a release.
 #
-# A clean merge is tested with the Slim CI workflow, fast-forwarded onto
-# main and tagged as the next slim release. A conflicting merge, or one
-# that adds upstream workflows, fails the run and explains why in the run
-# summary.
+# Master lane: merges upstream master (what upstream's nightly builds are
+# made from) into a throwaway branch and runs Slim CI on it, so breakage is
+# found before upstream releases it. It never touches main.
 #
-# Pushes with a token of the chatterino-slim-sync GitHub App (Contents and
-# Workflows read/write, installed on this repository only). GITHUB_TOKEN
-# can't push upstream's workflow changes, and its pushes don't start the
-# release. The app's client ID is the SYNC_APP_CLIENT_ID repository
-# variable. Its private key, SYNC_APP_PRIVATE_KEY, is in Infisical
-# (kub-homelab, prod, /projects/chatterino-slim/ci), read over GitHub OIDC
-# with the identity in the INFISICAL_GITHUB_ACTIONS_IDENTITY_ID variable.
+# Failures become one GitHub issue per lane and stage (label slim-incident).
+# A daily T3 Code task picks those up; see "Unattended repair" in the guide.
+#
+# Writes use a token of the chatterino-slim-sync GitHub App (Contents,
+# Workflows and Pull requests read/write): GITHUB_TOKEN can't push upstream's
+# workflow changes, and its pushes and pull requests don't start other
+# workflows. The app's client ID is the SYNC_APP_CLIENT_ID variable. Its
+# private key, SYNC_APP_PRIVATE_KEY, is in Infisical (kub-homelab, prod,
+# /projects/chatterino-slim/ci), read over GitHub OIDC with the identity in
+# the INFISICAL_GITHUB_ACTIONS_IDENTITY_ID variable. That identity only
+# accepts runs on main.
 name: Slim upstream sync
 
 on:
@@ -28,15 +30,10 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Upstream branch or tag to merge (empty: the master commit the latest release was cut from)"
+        description: "Upstream branch or tag for the release lane (empty: the master commit the latest release was cut from)"
         required: false
         default: ""
         type: string
-      release:
-        description: "Tag a slim release after merging"
-        required: false
-        default: true
-        type: boolean
 
 permissions:
   contents: read
@@ -46,14 +43,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  merge:
-    name: "Merge upstream"
+  release:
+    name: "Release lane"
     runs-on: arc-chatterino-slim
     permissions:
       contents: read
       id-token: write
     outputs:
-      branch: ${{ steps.merge.outputs.branch }}
+      result: ${{ steps.pr.outputs.result || steps.merge.outputs.result }}
+      label: ${{ steps.merge.outputs.label }}
+      target: ${{ steps.merge.outputs.target }}
+      pr: ${{ steps.pr.outputs.open || steps.open.outputs.number }}
     steps:
       - name: Fetch app key from Infisical
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
@@ -82,6 +82,7 @@ jobs:
           private-key: ${{ env.SYNC_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-workflows: write
+          permission-pull-requests: write
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,33 +90,80 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Merge
-        id: merge
-        env:
-          UPSTREAM_REF: ${{ inputs.ref }}
+      - name: Configure git
         run: |
           git config user.name "chatterino-slim sync"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          bash scripts/slim/merge-upstream.sh --push
 
-  test:
-    name: "Test merge"
-    needs: merge
-    if: needs.merge.outputs.branch != ''
-    uses: ./.github/workflows/slim-ci.yml
-    with:
-      ref: ${{ needs.merge.outputs.branch }}
+      # Branch protection only merges pull requests that are current with
+      # main, and auto-merge doesn't update them
+      - name: Keep the open sync pull request current
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          read -r number head < <(gh pr list --label upstream-sync --state open \
+            --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"' | head -n 1) || true
+          if [ -z "${number:-}" ]; then
+            exit 0
+          fi
+          echo "open=$number" >> "$GITHUB_OUTPUT"
+          git fetch --quiet origin "refs/heads/$head"
+          git switch --quiet -C "$head" FETCH_HEAD
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "Sync pull request #$number is current with main." >> "$GITHUB_STEP_SUMMARY"
+            echo "result=pending" >> "$GITHUB_OUTPUT"
+          elif git merge --no-edit -m "Merge main into $head" origin/main; then
+            git push --quiet origin "HEAD:refs/heads/$head"
+            echo "Merged main into sync pull request #$number." >> "$GITHUB_STEP_SUMMARY"
+            echo "result=updated" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "### Sync pull request #$number conflicts with main" >> "$GITHUB_STEP_SUMMARY"
+            echo "result=update-conflict" >> "$GITHUB_OUTPUT"
+          fi
 
-  publish:
-    name: "Merge into main and tag"
-    needs: [merge, test]
+      # Only one sync pull request at a time; a newer release follows once
+      # the open one is merged
+      - name: Merge upstream
+        id: merge
+        if: steps.pr.outputs.open == ''
+        env:
+          UPSTREAM_REF: ${{ inputs.ref }}
+        # The incidents job reports a missing result
+        run: bash scripts/slim/merge-upstream.sh --push || true
+
+      - name: Open pull request
+        id: open
+        if: steps.merge.outputs.result == 'merged' || steps.merge.outputs.result == 'exists'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+          LABEL: ${{ steps.merge.outputs.label }}
+          TARGET: ${{ steps.merge.outputs.target }}
+        run: |
+          url=$(gh pr create --base main --head "$BRANCH" --label upstream-sync \
+            --title "Merge $LABEL (${TARGET:0:10})" \
+            --body "Opened by the upstream sync. It merges by itself once slim-gate passes, and the merge is tagged as the next slim release. If it fails, the daily repair task opens an agent thread: see [Unattended repair](../blob/main/docs/dev/slim-fork.md#unattended-repair).")
+          # A merge commit keeps upstream's history, which later syncs rely on
+          gh pr merge "$url" --auto --merge
+          echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
+          echo "Opened $url" >> "$GITHUB_STEP_SUMMARY"
+
+  master:
+    name: "Master lane"
+    needs: release
+    # Runs after the release lane, whatever its outcome
+    if: ${{ !cancelled() }}
     runs-on: arc-chatterino-slim
     permissions:
       contents: read
-      actions: write
       id-token: write
-    env:
-      BRANCH: ${{ needs.merge.outputs.branch }}
+    outputs:
+      result: ${{ steps.merge.outputs.result || steps.tested.outputs.result }}
+      branch: ${{ steps.merge.outputs.branch }}
+      target: ${{ steps.merge.outputs.target }}
+      main: ${{ steps.key.outputs.main }}
     steps:
       - name: Fetch app key from Infisical
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
@@ -138,55 +186,157 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.merge.outputs.branch }}
+          ref: main
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Fast-forward main
-        run: git push origin "HEAD:refs/heads/main"
-
-      # Upstream's workflows stay in the tree so merges stay clean, but must
-      # not run here. The merge script refuses merges that add workflows, so
-      # this only catches ones that were enabled by hand
-      - name: Disable upstream workflows
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const workflows = await github.paginate(
-              github.rest.actions.listRepoWorkflows,
-              { owner: context.repo.owner, repo: context.repo.repo });
-            for (const workflow of workflows) {
-              if (workflow.path.startsWith('.github/workflows/slim-') ||
-                  workflow.state !== 'active') {
-                continue;
-              }
-              core.info(`Disabling ${workflow.path}`);
-              await github.rest.actions.disableWorkflow({
-                owner: context.repo.owner, repo: context.repo.repo,
-                workflow_id: workflow.id,
-              });
-            }
-
-      - name: Tag release
-        # Scheduled runs have no inputs
-        if: github.event_name == 'schedule' || inputs.release
-        env:
-          CHANNEL: ${{ vars.SLIM_CHANNEL || 'alpha' }}
+      - name: Configure git
         run: |
           git config user.name "chatterino-slim sync"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # A rerun after a later failure must not tag the same commit twice
-          existing=$(git tag --points-at HEAD --list 'v*-slim-*' | head -n 1)
-          if [ -n "$existing" ]; then
-            echo "Already tagged $existing" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          tag=$(bash scripts/slim/next-tag.sh "$CHANNEL")
-          git tag -a "$tag" -m "chatterino-slim $tag"
-          # Pushed with the app token so the release workflow starts
-          git push origin "$tag"
-          echo "Tagged $tag" >> "$GITHUB_STEP_SUMMARY"
 
-      # Last, so "Re-run failed jobs" still finds the branch
-      - name: Delete sync branch
-        run: git push origin --delete "$BRANCH"
+      # A pair of fork and upstream commits is tested once
+      - name: Key
+        id: key
+        run: |
+          main=$(git rev-parse HEAD)
+          master=$(git ls-remote https://github.com/Chatterino/chatterino2.git refs/heads/master | cut -f 1)
+          echo "main=$main" >> "$GITHUB_OUTPUT"
+          echo "key=slim-master-lane-$main-$master" >> "$GITHUB_OUTPUT"
+
+      - name: Look up earlier test
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .slim-master-lane
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+
+      - name: Already tested
+        id: tested
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: |
+          echo "result=tested" >> "$GITHUB_OUTPUT"
+          echo "This main and upstream master already passed." >> "$GITHUB_STEP_SUMMARY"
+
+      # Test branches belong to this job alone; drop ones a cancelled run left
+      - name: Merge upstream master
+        id: merge
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          UPSTREAM_REF: master
+          BRANCH: upstream-master-test/${{ steps.key.outputs.main }}
+        run: |
+          git ls-remote --heads origin 'upstream-master-test/*' | cut -f 2 |
+            while read -r ref; do git push --quiet origin --delete "$ref"; done
+          bash scripts/slim/merge-upstream.sh --push --branch "$BRANCH" || true
+
+  master-test:
+    name: "Master lane test"
+    needs: master
+    if: needs.master.outputs.result == 'merged'
+    uses: ./.github/workflows/slim-ci.yml
+    with:
+      ref: ${{ needs.master.outputs.branch }}
+
+  master-done:
+    name: "Master lane cleanup"
+    needs: [master, master-test]
+    if: ${{ !cancelled() && needs.master.outputs.result == 'merged' }}
+    # Same runner as the lookup: the cache key's version depends on the
+    # runner's compression tools
+    runs-on: arc-chatterino-slim
+    permissions:
+      contents: write
+    steps:
+      - name: Remember the passed pair
+        if: needs.master-test.result == 'success'
+        run: mkdir -p .slim-master-lane && touch .slim-master-lane/passed
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.master-test.result == 'success'
+        with:
+          path: .slim-master-lane
+          key: slim-master-lane-${{ needs.master.outputs.main }}-${{ needs.master.outputs.target }}
+
+      - name: Delete test branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.master.outputs.branch }}
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH"
+
+  incidents:
+    name: "Record incidents"
+    needs: [release, master, master-test]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close incident issues
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RELEASE_JOB: ${{ needs.release.result }}
+          RELEASE_RESULT: ${{ needs.release.outputs.result }}
+          RELEASE_LABEL: ${{ needs.release.outputs.label }}
+          RELEASE_TARGET: ${{ needs.release.outputs.target }}
+          RELEASE_PR: ${{ needs.release.outputs.pr }}
+          MASTER_JOB: ${{ needs.master.result }}
+          MASTER_RESULT: ${{ needs.master.outputs.result }}
+          MASTER_TARGET: ${{ needs.master.outputs.target }}
+          MASTER_MAIN: ${{ needs.master.outputs.main }}
+          MASTER_TEST: ${{ needs.master-test.result }}
+        with:
+          script: |
+            const e = process.env;
+            const { owner, repo } = context.repo;
+            const run = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const stage = (job, result, test) => {
+              if (job !== 'success' || !result) return 'controller';
+              if (['conflict', 'new-workflow', 'update-conflict'].includes(result)) return result;
+              if (result === 'merged' && test !== undefined && test !== 'success') return 'test';
+              return '';
+            };
+            const lanes = [
+              {
+                lane: 'release',
+                stage: stage(e.RELEASE_JOB, e.RELEASE_RESULT),
+                details: `Release lane: ${e.RELEASE_LABEL || 'unknown target'} ` +
+                  `(\`${e.RELEASE_TARGET || '?'}\`), result \`${e.RELEASE_RESULT || 'none'}\`` +
+                  (e.RELEASE_PR ? `, sync pull request #${e.RELEASE_PR}` : ''),
+              },
+              {
+                lane: 'master',
+                stage: stage(e.MASTER_JOB, e.MASTER_RESULT, e.MASTER_TEST),
+                details: `Master lane: upstream master \`${e.MASTER_TARGET || '?'}\` into ` +
+                  `main \`${e.MASTER_MAIN || '?'}\`, result \`${e.MASTER_RESULT || 'none'}\`, ` +
+                  `test \`${e.MASTER_TEST}\``,
+              },
+            ];
+            const open = await github.paginate(github.rest.issues.listForRepo,
+              { owner, repo, labels: 'slim-incident', state: 'open' });
+            for (const { lane, stage, details } of lanes) {
+              const marker = `<!-- slim-incident ${lane} ${stage} -->`;
+              const mine = open.filter(i => (i.body || '').includes(`<!-- slim-incident ${lane} `));
+              for (const issue of mine) {
+                if (stage && issue.body.includes(marker)) continue;
+                await github.rest.issues.createComment({ owner, repo, issue_number: issue.number,
+                  body: stage ? `The ${lane} lane now fails at \`${stage}\` instead: ${run}`
+                              : `Resolved in ${run}.` });
+                await github.rest.issues.update({ owner, repo, issue_number: issue.number,
+                  state: 'closed', state_reason: 'completed' });
+              }
+              if (!stage) continue;
+              const existing = mine.find(i => i.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: existing.number,
+                  body: `Still failing in ${run}.\n\n${details}` });
+              } else {
+                await github.rest.issues.create({ owner, repo, labels: ['slim-incident'],
+                  title: `Upstream sync: ${lane} lane fails at ${stage}`,
+                  body: `${marker}\nThe daily upstream sync failed: ${run}\n\n${details}\n\n` +
+                    'The run summary has the details. The daily repair task works on this issue; ' +
+                    'see [Unattended repair](../blob/main/docs/dev/slim-fork.md#unattended-repair). ' +
+                    'The issue closes itself once the lane passes again.' });
+              }
+            }
