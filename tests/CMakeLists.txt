@@ -41,6 +41,7 @@ set(test_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/TabHistory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/NotebookTab.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/SlimArgs.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/SlimSharedSettings.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/SlimNotebook.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/InstanceServer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/SplitInput.cpp

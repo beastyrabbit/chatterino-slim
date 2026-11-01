@@ -15,8 +15,11 @@ Each slim option is both a setting and a command-line flag. The option is on if 
 | Show the tab row only from the second tab on | Tabs → **Hide tabs while only one is open** | `--hide-single-tab` | `appearance.hideSingleTab` |
 | Tabs share the full window width | Tabs → **Stretch tabs to the window width** | `--fill-tabs` | `appearance.fillTabWidth` |
 | All of the above | | `--slim` | |
+| Save settings in windows opened with `-c` | Advanced → Windows opened with -c → **Save settings changed in these windows** | `--save-settings` | `misc.saveSettingsWithChannels` |
 
 The settings and account buttons come from upstream Chatterino. The flag hides both at once. Even with the flag set, the account button comes back when your login expires, so you can sign in again.
+
+`--slim` doesn't include `--save-settings`. See [Saving settings](#saving-settings).
 
 What stays visible in the slimmest layout: the chat, the input box and the emote button. The hidden parts stay reachable through hotkeys: Ctrl+P opens the settings, Ctrl+Shift+T opens a new tab, Ctrl+R changes the channel of the focused chat and Ctrl+W closes it. For the rest of the channel menu, turn the header back on.
 
@@ -51,7 +54,15 @@ How it behaves:
 
 Only Twitch channels (`t:`) are supported, as with `-c` in upstream Chatterino.
 
-`-c` starts a session that doesn't save its layout or settings, as in upstream Chatterino. A shared instance started with `-c` therefore forgets its tabs when it quits. Change settings in a normal launch without `-c`, or the changes are lost.
+`-c` starts a session that doesn't save its layout or settings, as in upstream Chatterino. A shared instance started with `-c` therefore forgets its tabs when it quits. To keep settings you change in it, see [Saving settings](#saving-settings).
+
+## Saving settings
+
+With `--save-settings`, or with the setting on, a window opened with `-c` saves the settings you change in it, and its settings dialog opens. It still doesn't save its tabs, so the layout of your normal Chatterino window stays as it is.
+
+Several Chatterino windows often run at once and share one `settings.json`. A window with this option writes only the settings it changed: it locks the file, reads it again, applies its own changes and leaves everything else as the file has it. So closing a window doesn't undo what you changed in another one, and it doesn't bring back a login you replaced elsewhere. Changes made in one window show up in the others after they restart.
+
+Windows without the option write all their settings, as upstream Chatterino does. If you also keep a normal Chatterino window open, turn the setting on there too (it takes effect after a restart), or that window can undo changes from the others when it saves.
 
 ## Launcher setups
 
@@ -79,8 +90,8 @@ To place the window with your window manager, match its window class: `com.chatt
 
 **A launch with `--instance` opened a separate window.** The first window was started without `--instance`, or with another name, or the name was invalid. Run the launch in a terminal and check for a warning.
 
-**Settings changes are gone after a restart.** That session was started with `-c`. See [Shared instances](#shared-instances).
+**Settings changes are gone after a restart.** That session was started with `-c` and without `--save-settings`. See [Saving settings](#saving-settings).
 
 **No tabs appear even with several chats open.** All tabs are hidden with Ctrl+U. Press Ctrl+U again.
 
-**Upstream Chatterino and chatterino-slim share settings.** Both use the same settings folder unless one of them is the Flatpak, which keeps its own. Settings for the slim options are ignored by upstream Chatterino. Don't run both against the same folder at the same time.
+**Upstream Chatterino and chatterino-slim share settings.** Both use the same settings folder unless one of them is the Flatpak, which keeps its own. Settings for the slim options are ignored by upstream Chatterino. Don't run both against the same folder at the same time: upstream Chatterino writes all its settings and can undo changes saved by chatterino-slim windows.

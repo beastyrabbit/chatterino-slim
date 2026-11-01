@@ -138,7 +138,18 @@ class Settings
 
     bool disableSaving;
 
+    // chatterino-slim: set when this process shares settings.json with other
+    // Chatterino processes. What the file held at the last load or save.
+    std::unique_ptr<rapidjson::Document> sharedSaveBase_;
+    QString sharedSavePath_;
+
 public:
+    /// chatterino-slim: false if this session never saves its settings
+    bool canSave() const
+    {
+        return !this->disableSaving;
+    }
+
     Settings(const Modes &modes, const Args &args,
              const QString &settingsDirectory,
              const SettingsArgs &settingsArgs = {});
@@ -240,6 +251,8 @@ public:
     BoolSetting hideSingleTab = {"/appearance/hideSingleTab", false};
     BoolSetting fillTabWidth = {"/appearance/fillTabWidth", false};
     BoolSetting hideAddTabButton = {"/appearance/hideAddTabButton", false};
+    BoolSetting saveSettingsWithChannels = {"/misc/saveSettingsWithChannels",
+                                            false};
     BoolSetting growWrappedNotebookLines = {
         "/appearance/growWrappedNotebookLines",
         false,

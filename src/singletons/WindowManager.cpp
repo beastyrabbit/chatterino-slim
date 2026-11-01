@@ -82,7 +82,7 @@ void WindowManager::showSettingsDialog(QWidget *parent,
 {
     using namespace std::chrono_literals;
 
-    if (this->appArgs.dontSaveSettings)
+    if (this->appArgs.dontSaveSettings && !getSettings()->canSave())
     {
         QMessageBox::critical(parent, "Chatterino - Editing Settings Forbidden",
                               "Settings cannot be edited when running with\n"

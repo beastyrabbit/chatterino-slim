@@ -24,6 +24,7 @@ The fork has to merge upstream releases without help, so its changes follow a fe
 | Chat header | `src/widgets/splits/Split.cpp` | Header follows `hideSplitHeader` |
 | Shared instance | `src/singletons/InstanceServer.{hpp,cpp}`, `src/main.cpp`, `src/Application.{hpp,cpp}` | Local socket server; `main()` forwards to a running instance before starting the app |
 | Startup | `src/Application.cpp` | No "show changelog?" prompt in sessions that can't save its answer (`-c`) |
+| Saving settings | `src/util/SharedSettings.{hpp,cpp}`, `src/singletons/Settings.{hpp,cpp}`, `src/singletons/WindowManager.cpp`, `src/widgets/dialogs/SettingsDialog.cpp` | `saveSettingsWithChannels` and `--save-settings`: `-c` sessions save settings (not their layout); `Settings::requestSave()` merges this process's changes into the file under a lock |
 
 `git diff <upstream fork point> -- src` shows the whole patch. Find the fork point with `git merge-base HEAD <upstream master>`.
 
@@ -45,6 +46,7 @@ Known limit: two first launches with the same name at the same moment can both s
 | --- | --- | --- |
 | Unit | `tests/src/SlimArgs.cpp` | Flag parsing, `--slim` implications, instance name validation, restart arguments |
 | Unit | `tests/src/SlimNotebook.cpp` | Single tab hidden, page fills the window, equal tab widths, default layout unchanged |
+| Unit | `tests/src/SlimSharedSettings.cpp` | Merging only this process's changes, a stale process not undoing another's save, a missing file |
 | Unit | `tests/src/InstanceServer.cpp` | `forward()` with and without a running instance, the JSON message |
 | Smoke | `tests/slim/smoke.sh` | Runs the real binary headless: `--help` lists the flags, add and remove tabs in a running instance, quit after the last tab, private socket |
 

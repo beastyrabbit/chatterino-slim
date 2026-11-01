@@ -600,6 +600,8 @@ set(SOURCE_FILES
         util/AttachToConsole.hpp
         util/Backup.cpp
         util/Backup.hpp
+        util/SharedSettings.cpp
+        util/SharedSettings.hpp
         util/BadgeRegistry.cpp
         util/BadgeRegistry.hpp
         util/CancellationToken.hpp
