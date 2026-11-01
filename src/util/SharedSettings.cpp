@@ -45,36 +45,36 @@ bool applyChanges(const rapidjson::Value &base, const rapidjson::Value &local,
         return true;
     }
 
+    // A key this process added counts as changed from an empty object, so
+    // keys that other processes added to the same object are kept
+    static const rapidjson::Value emptyObject(rapidjson::kObjectType);
+
     bool changed = false;
     for (const auto &member : local.GetObject())
     {
         auto inBase = base.FindMember(member.name);
+        const auto &old =
+            inBase == base.MemberEnd() ? emptyObject : inBase->value;
+        if (old == member.value)
+        {
+            continue;
+        }
+
         auto inTarget = target.FindMember(member.name);
         if (inTarget == target.MemberEnd())
         {
-            // Added here, or changed here after another process removed it
-            if (inBase == base.MemberEnd() || inBase->value != member.value)
-            {
-                target.AddMember(rapidjson::Value(member.name, allocator),
-                                 rapidjson::Value(member.value, allocator),
-                                 allocator);
-                changed = true;
-            }
+            // Added here, or changed here after another process removed it.
+            // Only what changed here is written, not the unchanged rest.
+            target.AddMember(rapidjson::Value(member.name, allocator),
+                             rapidjson::Value(member.value.IsObject()
+                                                  ? rapidjson::kObjectType
+                                                  : rapidjson::kNullType),
+                             allocator);
+            inTarget = target.FindMember(member.name);
+            changed = true;
         }
-        else if (inBase == base.MemberEnd())
-        {
-            if (inTarget->value != member.value)
-            {
-                inTarget->value.CopyFrom(member.value, allocator);
-                changed = true;
-            }
-        }
-        else
-        {
-            changed = applyChanges(inBase->value, member.value, inTarget->value,
-                                   allocator) ||
-                      changed;
-        }
+        changed = applyChanges(old, member.value, inTarget->value, allocator) ||
+                  changed;
     }
 
     for (const auto &member : base.GetObject())
@@ -110,19 +110,26 @@ pajlada::Settings::SettingManager::SaveResult save(
     }
 
     rapidjson::Document onDisk;
-    bool readable = false;
+    bool changed = true;
     QFile file(path);
-    if (file.open(QIODevice::ReadOnly))
+    if (file.exists())
     {
+        if (!file.open(QIODevice::ReadOnly))
+        {
+            qCWarning(chatterinoSettings)
+                << "Not saving settings: can't read" << path;
+            return SaveResult::Failed;
+        }
         auto data = file.readAll();
         file.close();
         onDisk.Parse(data.constData(), data.size());
-        readable = !onDisk.HasParseError() && onDisk.IsObject();
-    }
-
-    bool changed = true;
-    if (readable)
-    {
+        if (onDisk.HasParseError() || !onDisk.IsObject())
+        {
+            // Writing our whole copy could undo other windows' changes
+            qCWarning(chatterinoSettings)
+                << "Not saving settings: can't parse" << path;
+            return SaveResult::Failed;
+        }
         changed = applyChanges(base, local, onDisk, onDisk.GetAllocator());
     }
     else

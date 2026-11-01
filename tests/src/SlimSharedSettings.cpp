@@ -89,6 +89,28 @@ TEST(SlimSharedSettings, NoLocalChangesLeavesTargetAlone)
     EXPECT_EQ(target, json(R"({"a": 2, "b": 3})"));
 }
 
+TEST(SlimSharedSettings, ObjectsAddedInTwoProcessesAreMerged)
+{
+    auto base = json(R"({})");
+    auto local = json(R"({"header": {"uptime": true}})");
+    auto target = json(R"({"header": {"game": true}})");
+    EXPECT_TRUE(sharedsettings::applyChanges(base, local, target,
+                                             target.GetAllocator()));
+    EXPECT_EQ(target, json(R"({"header": {"game": true, "uptime": true}})"));
+}
+
+/// Another window removed the account. An edit here must not bring back the
+/// rest of it, such as the old token.
+TEST(SlimSharedSettings, RemovedObjectGetsOnlyChangedKeysBack)
+{
+    auto base = json(R"({"uid1": {"username": "a", "oauthToken": "old"}})");
+    auto local = json(R"({"uid1": {"username": "b", "oauthToken": "old"}})");
+    auto target = json(R"({})");
+    EXPECT_TRUE(sharedsettings::applyChanges(base, local, target,
+                                             target.GetAllocator()));
+    EXPECT_EQ(target, json(R"({"uid1": {"username": "b"}})"));
+}
+
 TEST(SlimSharedSettings, RemovedElsewhereStaysRemovedUnlessChangedHere)
 {
     auto base = json(R"({"untouched": 1, "edited": 1})");
@@ -132,6 +154,21 @@ TEST(SlimSharedSettings, StaleProcessDoesNotOverwriteOthers)
     first.set("/misc/y", rapidjson::Value(3));
     EXPECT_EQ(first.save(path), SaveResult::Success);
     EXPECT_EQ(read(path)["misc"], json(R"({"x": 2, "y": 3})"));
+}
+
+TEST(SlimSharedSettings, UnparsableFileIsNotOverwritten)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    auto path = dir.filePath("settings.json");
+    write(path, "{broken");
+
+    auto base = json(R"({"a": 1})");
+    auto local = json(R"({"a": 2})");
+    EXPECT_EQ(sharedsettings::save(path, local, base, 3), SaveResult::Failed);
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::ReadOnly));
+    EXPECT_EQ(file.readAll(), "{broken");
 }
 
 TEST(SlimSharedSettings, WritesEverythingWhenFileIsMissing)
