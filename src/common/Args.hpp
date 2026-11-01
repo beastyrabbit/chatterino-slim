@@ -88,6 +88,8 @@ public:
         bool hideAddTabButton{};
         bool hideSingleTab{};
         bool fillTabWidth{};
+        /// Save settings even with --channels, see util/SharedSettings.hpp
+        bool saveSettings{};
     } slim;
 
     /// Name of a shared instance. A later launch with the same name hands its

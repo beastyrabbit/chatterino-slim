@@ -1148,6 +1148,16 @@ void GeneralPage::initLayout(GeneralPageView &layout)
 
     layout.addTitle("Advanced");
 
+    layout.addSubtitle("Windows opened with -c");
+    SettingWidget::checkbox("Save settings changed in these windows",
+                            s.saveSettingsWithChannels)
+        ->setTooltip("Launchers open windows with -c, which normally don't "
+                     "save settings. With this on, they do, and every window "
+                     "with this on writes only the settings it changed, so "
+                     "open windows don't undo each other's changes. Takes "
+                     "effect after a restart.")
+        ->addTo(layout);
+
     layout.addSubtitle("Chat title");
     SettingWidget::inverseCheckbox("Show chat title", s.hideSplitHeader)
         ->setTooltip("Show the bar with the channel name, its menu and its "

@@ -21,6 +21,7 @@
 #include "debug/Benchmark.hpp"
 #include "pajlada/settings/signalargs.hpp"
 #include "util/Backup.hpp"
+#include "util/SharedSettings.hpp"
 #include "util/WindowsHelper.hpp"
 
 #include <pajlada/signals/scoped-connection.hpp>
@@ -1116,6 +1117,18 @@ Settings::Settings(const Modes &modes, const Args &args,
 
     settingsInstance->setBackupEnabled(true);
     settingsInstance->setBackupSlots(9);
+
+    // chatterino-slim: windows opened by a launcher run with -c and next to
+    // each other, so they save only their own changes
+    if ((this->saveSettingsWithChannels || args.slim.saveSettings) &&
+        !args.isFramelessEmbed && !settingsArgs.isTest)
+    {
+        this->disableSaving = false;
+        this->sharedSavePath_ = settingsPath;
+        this->sharedSaveBase_ = std::make_unique<rapidjson::Document>();
+        this->sharedSaveBase_->CopyFrom(settingsInstance->document,
+                                        this->sharedSaveBase_->GetAllocator());
+    }
     settingsInstance->saveMethod = static_cast<
         pajlada::Settings::SettingManager::SaveMethod>(
         static_cast<uint64_t>(
@@ -1173,6 +1186,14 @@ pajlada::Settings::SettingManager::SaveResult Settings::requestSave() const
     if (this->disableSaving)
     {
         return pajlada::Settings::SettingManager::SaveResult::Skipped;
+    }
+
+    if (this->sharedSaveBase_)
+    {
+        return sharedsettings::save(
+            this->sharedSavePath_,
+            pajlada::Settings::SettingManager::getInstance()->document,
+            *this->sharedSaveBase_, 9);
     }
 
     return pajlada::Settings::SettingManager::gSave();

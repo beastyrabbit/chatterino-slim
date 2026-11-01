@@ -41,6 +41,17 @@ TEST(SlimArgs, SlimImpliesEverySlimOption)
     EXPECT_TRUE(args.slim.fillTabWidth);
     // Slim options are session-only and must not stop settings from saving
     EXPECT_FALSE(args.dontSaveSettings);
+    // Saving is separate from the layout
+    EXPECT_FALSE(args.slim.saveSettings);
+}
+
+TEST(SlimArgs, SaveSettings)
+{
+    auto args = parse({"--save-settings", "-c", "t:forsen"});
+    EXPECT_TRUE(args.slim.saveSettings);
+    // -c still keeps its layout and changelog prompt out, as upstream
+    EXPECT_TRUE(args.dontSaveSettings);
+    EXPECT_TRUE(args.currentArguments().contains("--save-settings"));
 }
 
 TEST(SlimArgs, SingleOptions)

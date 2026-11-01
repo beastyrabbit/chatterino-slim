@@ -431,7 +431,7 @@ void SettingsDialog::showEvent(QShowEvent *e)
 ///// Widget creation helpers
 void SettingsDialog::onOkClicked()
 {
-    if (!getApp()->getArgs().dontSaveSettings)
+    if (!getApp()->getArgs().dontSaveSettings || getSettings()->canSave())
     {
         getApp()->getCommands()->save();
     }

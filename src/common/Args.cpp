@@ -216,6 +216,11 @@ Args::Args(const QStringList &arguments)
         "hide-single-tab", "Hides the tab bar while only one tab is open.");
     QCommandLineOption fillTabsOption(
         "fill-tabs", "Stretches tabs to fill the width of the window.");
+    QCommandLineOption saveSettingsOption(
+        "save-settings",
+        "Saves settings changed in this session, even with --channels. Each "
+        "window writes only the settings it changed, so open windows don't "
+        "undo each other's changes.");
 
     QCommandLineOption instanceOption(
         "instance",
@@ -256,6 +261,7 @@ Args::Args(const QStringList &arguments)
         hideAddTabButtonOption,
         hideSingleTabOption,
         fillTabsOption,
+        saveSettingsOption,
         instanceOption,
         removeOption,
 #ifndef NDEBUG
@@ -352,6 +358,7 @@ Args::Args(const QStringList &arguments)
         .hideAddTabButton = slim || parser.isSet(hideAddTabButtonOption),
         .hideSingleTab = slim || parser.isSet(hideSingleTabOption),
         .fillTabWidth = slim || parser.isSet(fillTabsOption),
+        .saveSettings = parser.isSet(saveSettingsOption),
     };
 
     if (parser.isSet(instanceOption))
@@ -396,6 +403,7 @@ Args::Args(const QStringList &arguments)
                                        hideAddTabButtonOption,
                                        hideSingleTabOption,
                                        fillTabsOption,
+                                       saveSettingsOption,
                                        instanceOption,
                                    });
 }
