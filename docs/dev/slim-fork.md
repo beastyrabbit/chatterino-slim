@@ -59,6 +59,8 @@ QT_QPA_PLATFORM=minimal build/bin/chatterino-test --gtest_filter='Slim*:Instance
 bash tests/slim/smoke.sh build/bin/chatterino
 ```
 
+In T3 Code, [t3.json](../../t3.json) offers the same steps as project actions (Init submodules, Configure, Build, Slim tests). T3 doesn't run them straight from the file: it lists them in the actions menu, and only actions imported into the project's T3 settings are active. Once imported, Init submodules runs whenever T3 creates a new worktree.
+
 The smoke test uses its own runtime directory and a throwaway portable profile, so it doesn't touch a running Chatterino or your settings. It runs on Qt's `offscreen` platform; static Qt builds only have `minimal`, so test those with `SMOKE_QPA_PLATFORM=minimal`. It needs the Qt WebP plugin installed (see the [user guide](../user/slim.md#troubleshooting)). Upstream's network tests also need `httpbox` and the PubSub test server; [slim-ci.yml](../../.github/workflows/slim-ci.yml) shows how to start them.
 
 When you change layout code, also look at the result. Qt's VNC platform renders without touching your desktop: `QT_QPA_PLATFORM=vnc:size=640x720:port=5912 build/bin/chatterino --portable --portable-dir /tmp/profile --slim -c t:somechannel`, then connect a VNC viewer to `localhost:5912`. The VNC server has no password and listens on all interfaces, so only do this behind a firewall that blocks the port.
