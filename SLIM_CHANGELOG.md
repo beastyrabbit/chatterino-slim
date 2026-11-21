@@ -4,6 +4,7 @@ Changes of the fork only. Upstream changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Unreleased
 
+- Fixed the upstream sync's master lane reporting an empty target commit on cache hits.
 - Added a setting and the `--save-settings` flag to save settings changed in windows opened with `-c`. Each window writes only the settings it changed, so open windows don't undo each other's changes. The window layout of `-c` sessions is still not saved.
 
 ## v2.5.6-slim-alpha.1

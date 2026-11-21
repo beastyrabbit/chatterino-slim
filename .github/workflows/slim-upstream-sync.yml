@@ -209,7 +209,7 @@ jobs:
     outputs:
       result: ${{ steps.merge.outputs.result || steps.tested.outputs.result }}
       branch: ${{ steps.merge.outputs.branch }}
-      target: ${{ steps.merge.outputs.target }}
+      target: ${{ steps.merge.outputs.target || steps.key.outputs.target }}
       main: ${{ steps.key.outputs.main }}
     steps:
       - name: Fetch app key from Infisical
@@ -249,6 +249,7 @@ jobs:
           main=$(git rev-parse HEAD)
           master=$(git ls-remote https://github.com/Chatterino/chatterino2.git refs/heads/master | cut -f 1)
           echo "main=$main" >> "$GITHUB_OUTPUT"
+          echo "target=$master" >> "$GITHUB_OUTPUT"
           echo "key=slim-master-lane-$main-$master" >> "$GITHUB_OUTPUT"
 
       - name: Look up earlier test
