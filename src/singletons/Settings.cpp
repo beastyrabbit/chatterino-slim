@@ -21,7 +21,6 @@
 #include "debug/Benchmark.hpp"
 #include "pajlada/settings/signalargs.hpp"
 #include "util/Backup.hpp"
-#include "util/SharedSettings.hpp"
 #include "util/WindowsHelper.hpp"
 
 #include <pajlada/signals/scoped-connection.hpp>
@@ -1187,7 +1186,8 @@ pajlada::Settings::SettingManager::SaveResult Settings::requestSave() const
     {
         return pajlada::Settings::SettingManager::SaveResult::Skipped;
     }
-
+    // chatterino-slim: kept apart from the gSave() call below so upstream's
+    // changes there merge cleanly; sharedsettings::save() counts its saves
     if (this->sharedSaveBase_)
     {
         return sharedsettings::save(

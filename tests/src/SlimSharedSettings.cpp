@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "Test.hpp"
+#include "util/DebugCount.hpp"
+#include "util/QMagicEnum.hpp"
 #include "util/SharedSettings.hpp"
 
 #include <QFile>
@@ -182,4 +184,66 @@ TEST(SlimSharedSettings, WritesEverythingWhenFileIsMissing)
     EXPECT_EQ(sharedsettings::save(path, local, base, 3), SaveResult::Success);
     EXPECT_EQ(read(path), local);
     EXPECT_EQ(base, local);
+}
+
+namespace {
+
+/// The value of one DebugCount counter, read from the debug text
+int64_t debugCount(DebugObject counter)
+{
+    auto prefix = qmagicenum::enumName(counter).toString() + ": ";
+    for (const auto &line : DebugCount::getDebugText().split('\n'))
+    {
+        if (line.startsWith(prefix))
+        {
+            return line.mid(prefix.size()).remove(',').toLongLong();
+        }
+    }
+    ADD_FAILURE() << "No debug counter " << prefix.toStdString();
+    return 0;
+}
+
+/// Upstream counts settings saves; shared saves must show up there too
+template <typename Object = DebugObject>
+void expectSharedSavesCounted()
+{
+    if constexpr (requires {
+                      Object::SettingsSave;
+                      Object::SettingsSaveError;
+                      Object::SettingsSaveSkipped;
+                  })
+    {
+        QTemporaryDir dir;
+        ASSERT_TRUE(dir.isValid());
+        auto path = dir.filePath("settings.json");
+        auto saved = debugCount(Object::SettingsSave);
+        auto failed = debugCount(Object::SettingsSaveError);
+        auto skipped = debugCount(Object::SettingsSaveSkipped);
+
+        rapidjson::Document base(rapidjson::kObjectType);
+        auto local = json(R"({"a": 1})");
+        EXPECT_EQ(sharedsettings::save(path, local, base, 3),
+                  SaveResult::Success);
+        EXPECT_EQ(sharedsettings::save(path, local, base, 3),
+                  SaveResult::Skipped);
+        write(path, "{broken");
+        local["a"] = 2;
+        EXPECT_EQ(sharedsettings::save(path, local, base, 3),
+                  SaveResult::Failed);
+
+        EXPECT_EQ(debugCount(Object::SettingsSave), saved + 1);
+        EXPECT_EQ(debugCount(Object::SettingsSaveError), failed + 1);
+        EXPECT_EQ(debugCount(Object::SettingsSaveSkipped), skipped + 1);
+    }
+    else
+    {
+        GTEST_SKIP() << "This Chatterino doesn't count settings saves yet";
+    }
+}
+
+}  // namespace
+
+TEST(SlimSharedSettings, SavesAreCounted)
+{
+    expectSharedSavesCounted();
 }

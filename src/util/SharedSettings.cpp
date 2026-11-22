@@ -5,6 +5,7 @@
 #include "util/SharedSettings.hpp"
 
 #include "common/QLogging.hpp"
+#include "util/DebugCount.hpp"
 #include "util/FilesystemHelpers.hpp"
 
 #include <pajlada/settings/backup.hpp>
@@ -89,7 +90,36 @@ bool applyChanges(const rapidjson::Value &base, const rapidjson::Value &local,
     return changed;
 }
 
-pajlada::Settings::SettingManager::SaveResult save(
+namespace {
+
+/// Counts a save the way upstream counts its own in Settings::requestSave().
+/// Does nothing while DebugObject lacks upstream's settings save counters.
+template <typename Object = DebugObject>
+void countSave(pajlada::Settings::SettingManager::SaveResult result)
+{
+    if constexpr (requires {
+                      Object::SettingsSave;
+                      Object::SettingsSaveError;
+                      Object::SettingsSaveSkipped;
+                  })
+    {
+        using SaveResult = pajlada::Settings::SettingManager::SaveResult;
+        switch (result)
+        {
+            case SaveResult::Success:
+                DebugCount::increase(Object::SettingsSave);
+                break;
+            case SaveResult::Failed:
+                DebugCount::increase(Object::SettingsSaveError);
+                break;
+            case SaveResult::Skipped:
+                DebugCount::increase(Object::SettingsSaveSkipped);
+                break;
+        }
+    }
+}
+
+pajlada::Settings::SettingManager::SaveResult saveUncounted(
     const QString &path, const rapidjson::Value &local,
     rapidjson::Document &base, std::uint8_t backupSlots)
 {
@@ -173,6 +203,17 @@ pajlada::Settings::SettingManager::SaveResult save(
     base.Swap(fresh);
 
     return changed ? SaveResult::Success : SaveResult::Skipped;
+}
+
+}  // namespace
+
+pajlada::Settings::SettingManager::SaveResult save(
+    const QString &path, const rapidjson::Value &local,
+    rapidjson::Document &base, std::uint8_t backupSlots)
+{
+    auto result = saveUncounted(path, local, base, backupSlots);
+    countSave(result);
+    return result;
 }
 
 }  // namespace chatterino::sharedsettings
